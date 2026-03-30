@@ -34,12 +34,25 @@ class Settings(BaseSettings):
     # ── File System ──────────────────────────────────────────────────────────
     ALLOWED_DIRECTORIES: list[str] = []   # 허용 파일 경로 목록 (절대 경로)
 
+    # ── SMTP (이메일) ─────────────────────────────────────────────────────────
+    # 비어 있으면 이메일 기능 비활성화 — 다른 기능에 영향 없음
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""                   # 발신자 표시명. 비어있으면 SMTP_USER 사용
+
     # ── Search ───────────────────────────────────────────────────────────────
     SEARCH_PROVIDER: str = "brave"        # brave | duckduckgo
     BRAVE_API_KEY: str = ""
 
     # ── Task (협의 카드) ──────────────────────────────────────────────────────
     TASK_TIMEOUT_SECONDS: int = 300       # pending_task 자동 거절 타임아웃 (5분)
+
+    @property
+    def smtp_configured(self) -> bool:
+        """SMTP 필수 항목(host, user, password)이 모두 설정되어 있는지 확인."""
+        return bool(self.SMTP_HOST and self.SMTP_USER and self.SMTP_PASSWORD)
 
 
 settings = Settings()

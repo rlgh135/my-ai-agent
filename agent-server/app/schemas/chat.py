@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Any
+import uuid
 
 
 class ChatRequest(BaseModel):
@@ -10,8 +11,8 @@ class ChatRequest(BaseModel):
 
 
 class MessageOut(BaseModel):
-    id: str
-    session_id: str
+    id: uuid.UUID          # DB 모델과 타입 일치, JSON 직렬화 시 문자열로 변환됨
+    session_id: uuid.UUID
     role: str
     content: str
     msg_type: str
@@ -29,7 +30,7 @@ class TokenUsageOut(BaseModel):
 
 
 class SessionOut(BaseModel):
-    id: str
+    id: uuid.UUID          # DB 모델과 타입 일치, JSON 직렬화 시 문자열로 변환됨
     title: str
     message_count: int
     created_at: datetime

@@ -15,7 +15,7 @@ TIMEOUT_SECONDS = 300  # 5분
 
 def register_task(task_id: str, task_type: str, params: dict) -> asyncio.Future:
     """협의 카드 생성 시 호출 — Future를 반환하여 백엔드 로직이 승인을 기다림"""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()   # Python 3.10+: get_event_loop() 대신 사용
     future = loop.create_future()
 
     async def _timeout():

@@ -1,4 +1,6 @@
 from contextlib import asynccontextmanager
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -8,11 +10,21 @@ from app.core.exceptions import AgentException
 from app.db.database import init_db
 from app.api.v1.router import api_router
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 시작 시 DB 초기화
-    await init_db()
+    # 시작 시 DB 초기화 — 실패해도 서버는 계속 기동
+    try:
+        await init_db()
+        logger.info("DB 초기화 완료")
+    except Exception as exc:
+        logger.error(
+            "DB 초기화 실패 — 채팅/세션 기능이 동작하지 않을 수 있습니다. "
+            "PostgreSQL 연결 정보(.env DATABASE_URL)를 확인해 주세요. 오류: %s",
+            exc,
+        )
     yield
     # 종료 처리 (필요 시 추가)
 

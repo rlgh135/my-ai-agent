@@ -6,8 +6,8 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.core.exceptions import (
-    FileNotFoundError,
-    FileExistsError,
+    AgentFileNotFoundError,
+    AgentFileExistsError,
     PathNotAllowedError,
 )
 
@@ -26,7 +26,7 @@ def _assert_allowed(path: str) -> Path:
 def list_directory(path: str) -> dict:
     p = _assert_allowed(path)
     if not p.exists():
-        raise FileNotFoundError(path)
+        raise AgentFileNotFoundError(path)
     items = []
     for item in sorted(p.iterdir()):
         stat = item.stat()
@@ -42,7 +42,7 @@ def list_directory(path: str) -> dict:
 def read_file(path: str) -> dict:
     p = _assert_allowed(path)
     if not p.exists():
-        raise FileNotFoundError(path)
+        raise AgentFileNotFoundError(path)
     content = p.read_text(encoding="utf-8", errors="replace")
     return {"path": str(p), "content": content, "size": p.stat().st_size, "encoding": "utf-8"}
 
@@ -51,7 +51,7 @@ def read_file(path: str) -> dict:
 def backup_file(src_path: str, dest_path: str = "") -> dict:
     src = _assert_allowed(src_path)
     if not src.exists():
-        raise FileNotFoundError(src_path)
+        raise AgentFileNotFoundError(src_path)
 
     if dest_path:
         dst = _assert_allowed(dest_path)
@@ -67,7 +67,7 @@ def backup_file(src_path: str, dest_path: str = "") -> dict:
 def create_file(path: str, content: str, overwrite: bool = False) -> dict:
     p = _assert_allowed(path)
     if p.exists() and not overwrite:
-        raise FileExistsError(path)
+        raise AgentFileExistsError(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return {"path": str(p), "size": p.stat().st_size}
@@ -77,6 +77,6 @@ def create_file(path: str, content: str, overwrite: bool = False) -> dict:
 def update_file(path: str, content: str) -> dict:
     p = _assert_allowed(path)
     if not p.exists():
-        raise FileNotFoundError(path)
+        raise AgentFileNotFoundError(path)
     p.write_text(content, encoding="utf-8")
     return {"path": str(p), "size": p.stat().st_size}

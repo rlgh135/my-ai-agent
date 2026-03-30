@@ -14,10 +14,14 @@ import { useTaskStore } from '@/store/taskStore'
 export function useSSE() {
   const abortRef = useRef(null)
   const { setStreaming, clearStreaming, setTokenUsage } = useChatStore()
-  const { appendMessage, updateLastAssistantMessage, finalizeAssistantMessage, activeSessionId } = useSessionStore()
+  const { appendMessage, updateLastAssistantMessage, finalizeAssistantMessage } = useSessionStore()
   const { addPendingTask } = useTaskStore()
 
   const sendMessage = useCallback(async (userMessage) => {
+    // 스토어에서 직접 최신 activeSessionId를 읽는다.
+    // useCallback 클로저로 캡처하면 createSession() 직후 stale 값이 남아
+    // 첫 메시지가 전송되지 않는 문제가 생긴다.
+    const { activeSessionId } = useSessionStore.getState()
     if (!activeSessionId) return
 
     // 사용자 메시지 즉시 추가
@@ -85,7 +89,16 @@ export function useSSE() {
             addPendingTask(event.task)
 
           } else if (event.type === 'error') {
-            finalizeAssistantMessage(`⚠️ 오류: ${event.message}`)
+            const icons = {
+              insufficient_credits: '💳',
+              auth_failed: '🔑',
+              rate_limit: '⏱️',
+              permission_denied: '🚫',
+              connection_error: '🌐',
+              server_error: '🖥️',
+            }
+            const icon = icons[event.error_code] || '⚠️'
+            finalizeAssistantMessage(`${icon} ${event.message}`)
           }
         }
       }
@@ -97,7 +110,8 @@ export function useSSE() {
       clearStreaming()
       abortRef.current = null
     }
-  }, [activeSessionId, appendMessage, updateLastAssistantMessage, finalizeAssistantMessage, setStreaming, clearStreaming, setTokenUsage, addPendingTask])
+  // activeSessionId를 dependency에서 제거 — 매 호출 시 getState()로 최신 값을 읽는다
+  }, [appendMessage, updateLastAssistantMessage, finalizeAssistantMessage, setStreaming, clearStreaming, setTokenUsage, addPendingTask])
 
   const cancel = useCallback(() => {
     abortRef.current?.abort()

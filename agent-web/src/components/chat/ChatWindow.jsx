@@ -7,6 +7,7 @@ import MessageBubble from './MessageBubble'
 import MessageInput from './MessageInput'
 import TaskCard from '@/components/tasks/TaskCard'
 import { useTaskStore } from '@/store/taskStore'
+import SmtpStatusBanner from '@/components/common/SmtpStatusBanner'
 
 export default function ChatWindow() {
   const { messages, isLoadingMessages, activeSessionId, createSession } = useSessionStore()
@@ -30,6 +31,9 @@ export default function ChatWindow() {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      {/* SMTP 미설정/연결 실패 시 경고 배너 */}
+      <SmtpStatusBanner />
+
       {/* 메시지 영역 */}
       <div className="flex-1 overflow-y-auto px-6 py-6" style={{ background: 'var(--color-surface-50)' }}>
         {isLoadingMessages ? (

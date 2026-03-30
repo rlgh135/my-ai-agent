@@ -14,4 +14,6 @@ class SmtpStatusOut(BaseModel):
     host: str = ""
     port: int = 587
     user: str = ""
-    test_result: str = "unknown"   # ok | fail | unknown
+    test_result: str = "unknown"        # ok | auth_failed | fail | not_configured | unknown
+    error: str | None = None            # 연결/인증 실패 시 오류 메시지
+    missing_fields: list[str] = []      # not_configured 시 누락 항목 목록

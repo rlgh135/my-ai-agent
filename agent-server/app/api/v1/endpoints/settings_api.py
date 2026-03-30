@@ -13,7 +13,7 @@ async def get_settings():
         "model": settings.CLAUDE_MODEL,
         "max_tokens": settings.CLAUDE_MAX_TOKENS,
         "allowed_directories": settings.ALLOWED_DIRECTORIES,
-        "smtp": {"configured": False},
+        "smtp": {"configured": settings.smtp_configured},
         "search": {"provider": settings.SEARCH_PROVIDER, "configured": bool(settings.BRAVE_API_KEY)},
     }
 

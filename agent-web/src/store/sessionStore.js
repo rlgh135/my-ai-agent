@@ -12,7 +12,8 @@ export const useSessionStore = create((set, get) => ({
     set({ isLoadingSessions: true })
     try {
       const data = await sessionApi.listSessions()
-      set({ sessions: data })
+      // 백엔드 응답: { sessions: [...], total: N }
+      set({ sessions: Array.isArray(data) ? data : (data.sessions ?? []) })
     } finally {
       set({ isLoadingSessions: false })
     }
@@ -29,7 +30,8 @@ export const useSessionStore = create((set, get) => ({
     set({ activeSessionId: sessionId, messages: [], isLoadingMessages: true })
     try {
       const data = await sessionApi.getMessages(sessionId)
-      set({ messages: data })
+      // 백엔드 응답: { session_id: '...', messages: [...] }
+      set({ messages: Array.isArray(data) ? data : (data.messages ?? []) })
     } finally {
       set({ isLoadingMessages: false })
     }
