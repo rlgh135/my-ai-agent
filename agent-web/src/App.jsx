@@ -5,10 +5,35 @@ import Header from '@/components/layout/Header'
 import ChatWindow from '@/components/chat/ChatWindow'
 import FileExplorer from '@/components/files/FileExplorer'
 import SettingsPanel from '@/components/settings/SettingsPanel'
+import SetupScreen from '@/components/setup/SetupScreen'
 import { useUiStore } from '@/store/uiStore'
+import { useSettingsStore } from '@/store/settingsStore'
 
 export default function App() {
-  const { view, setView } = useUiStore()
+  const { view } = useUiStore()
+  const { isInitialized, fetchSettings } = useSettingsStore()
+
+  // 앱 최초 마운트 시 설정 조회 → 초기화 여부 판단
+  useEffect(() => {
+    fetchSettings()
+  }, [fetchSettings])
+
+  // 아직 초기화 여부를 모르는 경우 (서버 응답 대기)
+  if (isInitialized === null) {
+    return (
+      <div className="flex h-screen items-center justify-center" style={{ background: 'var(--color-surface-50)' }}>
+        <div
+          className="w-6 h-6 rounded-full border-2 animate-spin"
+          style={{ borderColor: 'var(--color-brand-500)', borderTopColor: 'transparent' }}
+        />
+      </div>
+    )
+  }
+
+  // API Key 또는 사용자명 미설정 → 초기 설정 화면
+  if (!isInitialized) {
+    return <SetupScreen />
+  }
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--color-surface-50)' }}>

@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.exceptions import AgentException
-from app.db.database import init_db
+from app.db.database import init_db, AsyncSessionLocal
 from app.api.v1.router import api_router
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 시작 시 DB 초기화 — 실패해도 서버는 계속 기동
+    # 1. DB 초기화 (테이블 생성)
     try:
         await init_db()
         logger.info("DB 초기화 완료")
@@ -25,6 +25,16 @@ async def lifespan(app: FastAPI):
             "PostgreSQL 연결 정보(.env DATABASE_URL)를 확인해 주세요. 오류: %s",
             exc,
         )
+
+    # 2. DB 저장 설정을 runtime settings에 반영
+    try:
+        from app.api.v1.endpoints.settings_api import load_settings_from_db
+        async with AsyncSessionLocal() as db:
+            await load_settings_from_db(db)
+        logger.info("DB 설정 로드 완료")
+    except Exception as exc:
+        logger.warning("DB 설정 로드 실패 (기본값 사용): %s", exc)
+
     yield
     # 종료 처리 (필요 시 추가)
 
