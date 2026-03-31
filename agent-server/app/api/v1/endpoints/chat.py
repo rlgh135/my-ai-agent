@@ -343,22 +343,47 @@ async def _process_tool_block(block):
 
 # ── 핵심 SSE 스트리밍 제너레이터 ─────────────────────────────────────────────
 
+async def _save_messages(msgs: list[dict]) -> None:
+    """짧은 독립 트랜잭션으로 메시지 목록을 DB에 저장.
+    Claude API 호출 중 커넥션을 보유하지 않도록 각 커밋마다 별도 세션을 사용한다."""
+    async with AsyncSessionLocal() as db:
+        for m in msgs:
+            db.add(Message(**m))
+        await db.commit()
+
+
+async def _update_session_meta(session_uuid: uuid.UUID, count_delta: int, title: str | None) -> None:
+    """세션 메타데이터(message_count, title)를 독립 트랜잭션으로 업데이트."""
+    async with AsyncSessionLocal() as db:
+        session = await db.get(ChatSession, session_uuid)
+        if session:
+            session.message_count += count_delta
+            if title is not None:
+                session.title = title
+        await db.commit()
+
+
 async def _stream_chat(session_id: str, message: str):
-    """Agentic loop: Claude ↔ Tool 반복 호출을 SSE로 스트리밍."""
+    """Agentic loop: Claude ↔ Tool 반복 호출을 SSE로 스트리밍.
+
+    DB 커넥션은 각 commit마다 독립적인 async with 세션을 사용하여
+    Claude API 호출 중(수십 초) 커넥션을 보유하지 않는다.
+    이를 통해 asyncpg 커넥션 만료로 인한 IntegrityError / InvalidRequestError 방지.
+    """
     try:
         session_uuid = uuid.UUID(session_id)
     except ValueError:
         yield _sse({"type": "error", "message": f"유효하지 않은 세션 ID: {session_id}"})
         return
 
+    # ── 1. 세션 확인 + 히스토리 로드 (짧은 트랜잭션, 즉시 반환) ─────────────
     async with AsyncSessionLocal() as db:
-        # 세션 존재 확인
         session = await db.get(ChatSession, session_uuid)
         if not session:
             yield _sse({"type": "error", "message": f"세션을 찾을 수 없습니다: {session_id}"})
             return
+        is_first_message = (session.message_count == 0)
 
-        # 히스토리 로드 (최근 50개 — tool 메시지 포함)
         result = await db.execute(
             select(Message)
             .where(Message.session_id == session_uuid)
@@ -367,201 +392,183 @@ async def _stream_chat(session_id: str, message: str):
         )
         history = result.scalars().all()
         messages = _build_history(history)
-        messages.append({"role": "user", "content": message})
+    # ← 여기서 DB 커넥션 반환 (Claude API 호출 전)
 
-        # 사용자 메시지 DB 저장 — Claude API 호출 전에 즉시 커밋하여
-        # 장시간 대기 중 asyncpg 커넥션 만료로 인한 commit 실패 방지
-        db.add(Message(
-            session_id=session_uuid,
-            role="user",
-            content=message,
-            msg_type="text",
-        ))
-        is_first_message = (session.message_count == 0)
-        try:
-            await db.commit()
-        except Exception as exc:
-            logger.error("사용자 메시지 DB 저장 실패: %s", exc)
+    messages.append({"role": "user", "content": message})
 
-        # 초기 토큰 사용량 전송
-        used = count_messages_tokens(messages)
-        yield _sse({"type": "token_usage", **get_usage_status(used), "session_id": session_id})
+    # ── 2. 사용자 메시지 저장 (독립 트랜잭션) ────────────────────────────────
+    try:
+        await _save_messages([{
+            "session_id": session_uuid, "role": "user",
+            "content": message, "msg_type": "text",
+        }])
+    except Exception as exc:
+        logger.error("사용자 메시지 DB 저장 실패: %s(%s)", type(exc).__name__, exc)
 
-        client = _get_client()
-        final_text = ""    # 최종 assistant 텍스트 (done 이벤트용)
-        tool_turns = 0
+    # 초기 토큰 사용량 전송
+    used = count_messages_tokens(messages)
+    yield _sse({"type": "token_usage", **get_usage_status(used), "session_id": session_id})
 
-        try:
-            # ── Agentic Loop ────────────────────────────────────────────────
-            while tool_turns <= MAX_TOOL_TURNS:
-                full_text = ""
+    client = _get_client()
+    final_text = ""
+    tool_turns = 0
 
-                async with client.messages.stream(
-                    model=settings.CLAUDE_MODEL,
-                    max_tokens=settings.CLAUDE_MAX_TOKENS,
-                    system=SYSTEM_PROMPT,
-                    tools=TOOLS,
-                    messages=messages,
-                ) as stream:
-                    async for text in stream.text_stream:
-                        full_text += text
-                        yield _sse({"type": "delta", "content": text})
+    try:
+        # ── Agentic Loop ────────────────────────────────────────────────────
+        while tool_turns <= MAX_TOOL_TURNS:
+            full_text = ""
 
-                    final_msg = await stream.get_final_message()
+            # Claude API 호출 — DB 커넥션 없이 실행
+            async with client.messages.stream(
+                model=settings.CLAUDE_MODEL,
+                max_tokens=settings.CLAUDE_MAX_TOKENS,
+                system=SYSTEM_PROMPT,
+                tools=TOOLS,
+                messages=messages,
+            ) as stream:
+                async for text in stream.text_stream:
+                    full_text += text
+                    yield _sse({"type": "delta", "content": text})
 
-                final_text = full_text
+                final_msg = await stream.get_final_message()
 
-                # ── 순수 텍스트 응답 → 루프 종료 ─────────────────────────────
-                if final_msg.stop_reason == "end_turn":
-                    total_tokens = final_msg.usage.input_tokens + final_msg.usage.output_tokens
-                    db.add(Message(
-                        session_id=session_uuid,
-                        role="assistant",
-                        content=final_text,
-                        msg_type="text",
-                    ))
-                    if is_first_message:
-                        session.title = message[:40]
-                    session.message_count += 2
-                    try:
-                        await db.commit()
-                    except Exception as db_exc:
-                        logger.error("DB commit 실패 (end_turn): %s", db_exc)
-                    # done은 DB 성공/실패 무관하게 반드시 전송 — 미전송 시 커넥션이 열린 채로 남아 버튼 고착
-                    yield _sse({
-                        "type": "done",
-                        "content": final_text,
-                        "token_usage": get_usage_status(total_tokens),
-                    })
-                    return  # 제너레이터 즉시 종료 → 커넥션 닫힘 → clearStreaming() 호출
+            final_text = full_text
 
-                # ── tool_use 응답 → 도구 실행 후 계속 ────────────────────────
-                elif final_msg.stop_reason == "tool_use":
-                    tool_turns += 1
-
-                    # assistant 응답(tool_use 포함) messages에 추가
-                    # Anthropic API가 허용하는 필드만 명시적으로 추출 (parsed_output 등 내부 필드 제외)
-                    assistant_content = []
-                    for block in final_msg.content:
-                        if getattr(block, "type", None) == "text":
-                            assistant_content.append({"type": "text", "text": block.text})
-                        elif getattr(block, "type", None) == "tool_use":
-                            assistant_content.append({
-                                "type":  "tool_use",
-                                "id":    block.id,
-                                "name":  block.name,
-                                "input": block.input,
-                            })
-                        # 그 외 block 타입은 건너뜀
-                    messages.append({"role": "assistant", "content": assistant_content})
-
-                    # tool_use_response DB 저장 (히스토리 재구성용)
-                    db.add(Message(
-                        session_id=session_uuid,
-                        role="assistant",
-                        content=json.dumps(assistant_content, ensure_ascii=False),
-                        msg_type="tool_use_response",
-                    ))
-
-                    # 도구 실행
-                    tool_results: list[dict] = []
-                    tool_blocks = [b for b in final_msg.content if b.type == "tool_use"]
-
-                    for block in tool_blocks:
-                        async for event in _process_tool_block(block):
-                            if "_tool_result" in event:
-                                tool_results.append(event["_tool_result"])
-                            else:
-                                yield _sse(event)  # task_pending 등
-
-                    # tool_result messages에 추가
-                    messages.append({"role": "user", "content": tool_results})
-
-                    # tool_result DB 저장 후 즉시 커밋 — 도구 메시지는 각 턴마다 저장하여
-                    # 다음 Claude API 호출 전 커넥션을 해제하고 트랜잭션 만료 방지
-                    db.add(Message(
-                        session_id=session_uuid,
-                        role="user",
-                        content=json.dumps(tool_results, ensure_ascii=False),
-                        msg_type="tool_result",
-                    ))
-                    try:
-                        await db.commit()
-                    except Exception as exc:
-                        logger.error("도구 메시지 DB 저장 실패 (turn %d): %s", tool_turns, exc)
-
-                # ── max_tokens 등 기타 stop_reason ────────────────────────────
-                else:
-                    total_tokens = final_msg.usage.input_tokens + final_msg.usage.output_tokens
-                    db.add(Message(
-                        session_id=session_uuid,
-                        role="assistant",
-                        content=final_text,
-                        msg_type="text",
-                    ))
-                    if is_first_message:
-                        session.title = message[:40]
-                    session.message_count += 2
-                    try:
-                        await db.commit()
-                    except Exception as db_exc:
-                        logger.error("DB commit 실패 (stop_reason=%s): %s", final_msg.stop_reason, db_exc)
-                    yield _sse({
-                        "type": "done",
-                        "content": final_text,
-                        "token_usage": get_usage_status(total_tokens),
-                    })
-                    return  # 제너레이터 즉시 종료
-
-            else:
-                # MAX_TOOL_TURNS 초과
-                if is_first_message:
-                    session.title = message[:40]
-                session.message_count += 2
+            # ── 순수 텍스트 응답 → 루프 종료 ─────────────────────────────
+            if final_msg.stop_reason == "end_turn":
+                total_tokens = final_msg.usage.input_tokens + final_msg.usage.output_tokens
                 try:
-                    await db.commit()
+                    await _save_messages([{
+                        "session_id": session_uuid, "role": "assistant",
+                        "content": final_text, "msg_type": "text",
+                    }])
+                    await _update_session_meta(
+                        session_uuid, 2,
+                        message[:40] if is_first_message else None,
+                    )
                 except Exception as db_exc:
-                    logger.error("DB commit 실패 (max_tool_turns): %s", db_exc)
+                    logger.error("DB 저장 실패 (end_turn): %s(%s)", type(db_exc).__name__, db_exc)
                 yield _sse({
-                    "type": "error",
-                    "message": "도구 호출 최대 횟수를 초과했습니다. 더 구체적인 요청을 시도해 주세요.",
-                    "error_code": "max_tool_turns",
+                    "type": "done",
+                    "content": final_text,
+                    "token_usage": get_usage_status(total_tokens),
                 })
-                return  # 제너레이터 즉시 종료
+                return
 
-        # ── Anthropic API 예외 처리 ──────────────────────────────────────────
-        except anthropic.AuthenticationError:
-            yield _sse({"type": "error", "message": "API 인증 실패: 설정의 ANTHROPIC_API_KEY를 확인하세요.", "error_code": "auth_failed"})
-            return
-        except anthropic.PermissionDeniedError:
-            yield _sse({"type": "error", "message": "API 접근 권한이 없습니다.", "error_code": "permission_denied"})
-            return
-        except anthropic.RateLimitError:
-            yield _sse({"type": "error", "message": "API 요청 한도를 초과했습니다. 잠시 후 다시 시도하세요.", "error_code": "rate_limit"})
-            return
-        except anthropic.BadRequestError as e:
-            body = getattr(e, "body", {}) or {}
-            inner = body.get("error", {}) if isinstance(body, dict) else {}
-            raw_msg = inner.get("message", "") or str(e)
-            if "credit balance" in raw_msg.lower() or "billing" in raw_msg.lower():
-                yield _sse({"type": "error", "message": "Anthropic API 크레딧이 부족합니다.", "error_code": "insufficient_credits"})
+            # ── tool_use 응답 → 도구 실행 후 계속 ────────────────────────
+            elif final_msg.stop_reason == "tool_use":
+                tool_turns += 1
+
+                # Anthropic API 허용 필드만 추출 (parsed_output 등 내부 필드 제외)
+                assistant_content = []
+                for block in final_msg.content:
+                    if getattr(block, "type", None) == "text":
+                        assistant_content.append({"type": "text", "text": block.text})
+                    elif getattr(block, "type", None) == "tool_use":
+                        assistant_content.append({
+                            "type": "tool_use", "id": block.id,
+                            "name": block.name, "input": block.input,
+                        })
+                messages.append({"role": "assistant", "content": assistant_content})
+
+                # 도구 실행 (safe: 즉시 / risky: 승인 대기)
+                tool_results: list[dict] = []
+                tool_blocks = [b for b in final_msg.content if b.type == "tool_use"]
+                for block in tool_blocks:
+                    async for event in _process_tool_block(block):
+                        if "_tool_result" in event:
+                            tool_results.append(event["_tool_result"])
+                        else:
+                            yield _sse(event)
+
+                messages.append({"role": "user", "content": tool_results})
+
+                # 도구 메시지 저장 (독립 트랜잭션 — 다음 Claude 호출 전 커넥션 반환)
+                try:
+                    await _save_messages([
+                        {
+                            "session_id": session_uuid, "role": "assistant",
+                            "content": json.dumps(assistant_content, ensure_ascii=False),
+                            "msg_type": "tool_use_response",
+                        },
+                        {
+                            "session_id": session_uuid, "role": "user",
+                            "content": json.dumps(tool_results, ensure_ascii=False),
+                            "msg_type": "tool_result",
+                        },
+                    ])
+                except Exception as exc:
+                    logger.error("도구 메시지 DB 저장 실패 (turn %d): %s(%s)", tool_turns, type(exc).__name__, exc)
+
+            # ── max_tokens 등 기타 stop_reason ────────────────────────────
             else:
-                yield _sse({"type": "error", "message": f"잘못된 요청: {raw_msg}", "error_code": "bad_request"})
+                total_tokens = final_msg.usage.input_tokens + final_msg.usage.output_tokens
+                try:
+                    await _save_messages([{
+                        "session_id": session_uuid, "role": "assistant",
+                        "content": final_text, "msg_type": "text",
+                    }])
+                    await _update_session_meta(
+                        session_uuid, 2,
+                        message[:40] if is_first_message else None,
+                    )
+                except Exception as db_exc:
+                    logger.error("DB 저장 실패 (stop_reason=%s): %s(%s)", final_msg.stop_reason, type(db_exc).__name__, db_exc)
+                yield _sse({
+                    "type": "done",
+                    "content": final_text,
+                    "token_usage": get_usage_status(total_tokens),
+                })
+                return
+
+        else:
+            # MAX_TOOL_TURNS 초과
+            try:
+                await _update_session_meta(
+                    session_uuid, 2,
+                    message[:40] if is_first_message else None,
+                )
+            except Exception as db_exc:
+                logger.error("DB 저장 실패 (max_tool_turns): %s(%s)", type(db_exc).__name__, db_exc)
+            yield _sse({
+                "type": "error",
+                "message": "도구 호출 최대 횟수를 초과했습니다. 더 구체적인 요청을 시도해 주세요.",
+                "error_code": "max_tool_turns",
+            })
             return
-        except anthropic.InternalServerError:
-            yield _sse({"type": "error", "message": "Anthropic 서버 오류입니다. 잠시 후 다시 시도하세요.", "error_code": "server_error"})
-            return
-        except anthropic.APIConnectionError:
-            yield _sse({"type": "error", "message": "Anthropic API 서버에 연결할 수 없습니다.", "error_code": "connection_error"})
-            return
-        except anthropic.APIError as e:
-            yield _sse({"type": "error", "message": f"API 오류: {e}", "error_code": "api_error"})
-            return
-        except Exception as e:
-            # DB 오류 등 예상치 못한 예외 — done/error를 반드시 전송해 커넥션을 닫아 버튼 고착 방지
-            logger.error("예상치 못한 오류: %s(%s)", type(e).__name__, e)
-            yield _sse({"type": "error", "message": "서버 내부 오류가 발생했습니다.", "error_code": "server_error"})
-            return
+
+    # ── Anthropic API 예외 처리 ──────────────────────────────────────────
+    except anthropic.AuthenticationError:
+        yield _sse({"type": "error", "message": "API 인증 실패: 설정의 ANTHROPIC_API_KEY를 확인하세요.", "error_code": "auth_failed"})
+        return
+    except anthropic.PermissionDeniedError:
+        yield _sse({"type": "error", "message": "API 접근 권한이 없습니다.", "error_code": "permission_denied"})
+        return
+    except anthropic.RateLimitError:
+        yield _sse({"type": "error", "message": "API 요청 한도를 초과했습니다. 잠시 후 다시 시도하세요.", "error_code": "rate_limit"})
+        return
+    except anthropic.BadRequestError as e:
+        body = getattr(e, "body", {}) or {}
+        inner = body.get("error", {}) if isinstance(body, dict) else {}
+        raw_msg = inner.get("message", "") or str(e)
+        if "credit balance" in raw_msg.lower() or "billing" in raw_msg.lower():
+            yield _sse({"type": "error", "message": "Anthropic API 크레딧이 부족합니다.", "error_code": "insufficient_credits"})
+        else:
+            yield _sse({"type": "error", "message": f"잘못된 요청: {raw_msg}", "error_code": "bad_request"})
+        return
+    except anthropic.InternalServerError:
+        yield _sse({"type": "error", "message": "Anthropic 서버 오류입니다. 잠시 후 다시 시도하세요.", "error_code": "server_error"})
+        return
+    except anthropic.APIConnectionError:
+        yield _sse({"type": "error", "message": "Anthropic API 서버에 연결할 수 없습니다.", "error_code": "connection_error"})
+        return
+    except anthropic.APIError as e:
+        yield _sse({"type": "error", "message": f"API 오류: {e}", "error_code": "api_error"})
+        return
+    except Exception as e:
+        logger.error("예상치 못한 오류: %s(%s)", type(e).__name__, e)
+        yield _sse({"type": "error", "message": "서버 내부 오류가 발생했습니다.", "error_code": "server_error"})
+        return
 
 
 # ── 라우터 ────────────────────────────────────────────────────────────────────
