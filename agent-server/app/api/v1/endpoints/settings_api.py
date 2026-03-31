@@ -75,25 +75,29 @@ async def _upsert_setting(db: AsyncSession, key: str, value: str, is_encrypted: 
 
 @router.get("/settings")
 async def get_settings():
-    """현재 설정 반환. 민감한 값은 마스킹 처리."""
+    """현재 설정 반환. 민감한 값은 실제 값 대신 설정 여부만 반환."""
+    naver_configured = bool(
+        getattr(settings, "NAVER_CLIENT_ID", "") and getattr(settings, "NAVER_API_KEY", "")
+    )
     return {
-        "user_name":                settings.USER_NAME,
+        # 사용자 정보
+        "user_name":                    settings.USER_NAME,
+        # AI 모델
         "anthropic_api_key_configured": bool(settings.ANTHROPIC_API_KEY),
-        "model":                    settings.CLAUDE_MODEL,
-        "max_tokens":               settings.CLAUDE_MAX_TOKENS,
-        "allowed_directories":      settings.ALLOWED_DIRECTORIES,
-        "smtp": {
-            "configured": settings.smtp_configured,
-            "host":  settings.SMTP_HOST,
-            "port":  settings.SMTP_PORT,
-            "user":  settings.SMTP_USER,
-            "from_": settings.SMTP_FROM,
-        },
-        "search": {
-            "provider":   settings.SEARCH_PROVIDER,
-            "brave_configured": bool(settings.BRAVE_API_KEY),
-            "naver_configured": bool(getattr(settings, "NAVER_API_KEY", "")),
-        },
+        "claude_model":                 settings.CLAUDE_MODEL,
+        # 파일 시스템
+        "allowed_directories":          settings.ALLOWED_DIRECTORIES,  # list[str]
+        # SMTP
+        "smtp_host":                    settings.SMTP_HOST,
+        "smtp_port":                    settings.SMTP_PORT,
+        "smtp_user":                    settings.SMTP_USER,
+        "smtp_from":                    settings.SMTP_FROM,
+        "smtp_configured":              settings.smtp_configured,
+        # 검색
+        "search_provider":              settings.SEARCH_PROVIDER,
+        "brave_configured":             bool(settings.BRAVE_API_KEY),
+        "naver_client_id":              getattr(settings, "NAVER_CLIENT_ID", ""),  # Client ID는 비민감
+        "naver_configured":             naver_configured,
     }
 
 
@@ -116,8 +120,13 @@ async def update_settings(body: dict, db: AsyncSession = Depends(get_db)):
         else:
             raw = str(value) if value is not None else ""
 
-        stored = vault.encrypt(raw) if is_sensitive and raw else raw
-        await _upsert_setting(db, key, stored, is_encrypted=(is_sensitive and bool(raw)))
+        # 민감 필드를 빈 값으로 보내면 기존 값을 보존한다.
+        # (프론트엔드에서 실제 값을 모르므로 비워서 전송할 수 있음)
+        if is_sensitive and not raw:
+            continue
+
+        stored = vault.encrypt(raw) if is_sensitive else raw
+        await _upsert_setting(db, key, stored, is_encrypted=is_sensitive)
 
         # runtime 즉시 반영
         attr = _KEY_TO_ATTR[key]
