@@ -5,8 +5,8 @@ from app.schemas.files import (
     DirectoryListOut, FileContentOut,
     FileCreateRequest, FileUpdateRequest,
     FileBackupRequest, FileBackupOut,
+    FileDeleteRequest, FileDeleteOut,
 )
-import uuid
 
 router = APIRouter()
 
@@ -21,35 +21,21 @@ async def read_file(path: str = Query(...)):
     return fs.read_file(path)
 
 
-@router.post("/files", status_code=202)
+@router.post("/files", response_model=dict, status_code=201)
 async def create_file(body: FileCreateRequest):
-    # 협의 카드 반환 (실행 보류)
-    task_id = str(uuid.uuid4())
-    preview = body.content[:200] + ("..." if len(body.content) > 200 else "")
-    return {
-        "task_id": task_id,
-        "type": "create",
-        "status": "pending",
-        "params": {"path": body.path},
-        "preview": preview,
-    }
+    return fs.create_file(body.path, body.content, body.overwrite)
 
 
-@router.put("/files", status_code=202)
+@router.put("/files", response_model=dict)
 async def update_file(body: FileUpdateRequest):
-    # 백업 자동 실행 → 협의 카드 반환
-    backup_result = fs.backup_file(body.path)
-    task_id = str(uuid.uuid4())
-    return {
-        "task_id": task_id,
-        "type": "update",
-        "status": "pending",
-        "backup_path": backup_result["backup_path"],
-        "diff": body.diff,
-        "params": {"path": body.path},
-    }
+    return fs.update_file(body.path, body.content)
 
 
 @router.post("/files/backup", response_model=FileBackupOut)
 async def backup_file(body: FileBackupRequest):
     return fs.backup_file(body.src_path, body.dest_path)
+
+
+@router.delete("/files", response_model=FileDeleteOut)
+async def delete_file(body: FileDeleteRequest):
+    return fs.delete_file(body.path)

@@ -4,7 +4,8 @@ from datetime import datetime
 
 class FileItem(BaseModel):
     name: str
-    type: str        # file | directory
+    path: str          # 절대 경로 (탐색기 / AI 도구 호출용)
+    type: str          # file | directory
     size: int = 0
     modified_at: datetime | None = None
 
@@ -24,12 +25,13 @@ class FileContentOut(BaseModel):
 class FileCreateRequest(BaseModel):
     path: str
     content: str
+    overwrite: bool = False
 
 
 class FileUpdateRequest(BaseModel):
     path: str
     content: str
-    diff: str = ""   # 미리보기용 diff 텍스트
+    diff: str = ""
 
 
 class FileBackupRequest(BaseModel):
@@ -39,4 +41,13 @@ class FileBackupRequest(BaseModel):
 
 class FileBackupOut(BaseModel):
     src_path: str
+    backup_path: str
+
+
+class FileDeleteRequest(BaseModel):
+    path: str
+
+
+class FileDeleteOut(BaseModel):
+    deleted_path: str
     backup_path: str

@@ -107,6 +107,21 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "delete_file",
+        "description": (
+            "파일을 삭제합니다. 삭제 전 자동으로 백업이 생성됩니다. "
+            "디렉토리는 삭제할 수 없습니다. "
+            "실행 전 사용자 승인이 필요합니다."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "삭제할 파일 절대 경로"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
         "name": "send_email",
         "description": (
             "이메일을 전송합니다. SMTP 설정이 되어 있어야 하며, "
@@ -131,6 +146,7 @@ _RISKY_TOOLS: dict[str, str] = {
     "create_file": "filesystem_create",
     "update_file": "filesystem_update",
     "backup_file": "filesystem_backup",
+    "delete_file": "filesystem_delete",
     "send_email":  "email_send",
 }
 
@@ -177,7 +193,7 @@ def _build_history(messages_from_db: list) -> list[dict]:
 
 def _make_task_event(tool_name: str, params: dict, task_id: str) -> dict:
     """프론트엔드 TaskCard가 기대하는 task_pending SSE 페이로드 생성."""
-    if tool_name in ("create_file", "update_file", "backup_file"):
+    if tool_name in ("create_file", "update_file", "backup_file", "delete_file"):
         payload = {"path": params.get("path", ""), "content": params.get("content")}
     elif tool_name == "send_email":
         payload = {
@@ -194,6 +210,8 @@ def _make_task_event(tool_name: str, params: dict, task_id: str) -> dict:
         description = f"'{params.get('path', '')}' 파일을 수정합니다. (수정 전 자동 백업 포함)"
     elif tool_name == "backup_file":
         description = f"'{params.get('path', '')}' 파일을 백업합니다."
+    elif tool_name == "delete_file":
+        description = f"'{params.get('path', '')}' 파일을 삭제합니다. (삭제 전 자동 백업 포함)"
     elif tool_name == "send_email":
         recipients = ", ".join(params.get("to", []))
         description = f"{recipients}에게 '{params.get('subject', '')}' 이메일을 발송합니다."
@@ -255,6 +273,10 @@ async def _run_risky_tool(tool_name: str, params: dict) -> str:
         if tool_name == "backup_file":
             result = filesystem.backup_file(params["path"], params.get("dest_path", ""))
             return f"백업 완료: {result['backup_path']}"
+
+        if tool_name == "delete_file":
+            result = filesystem.delete_file(params["path"])
+            return f"파일 삭제 완료: {result['deleted_path']} | 백업: {result['backup_path']}"
 
         if tool_name == "send_email":
             result = await email_sender.send_email(

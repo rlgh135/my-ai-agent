@@ -7,6 +7,7 @@ const TASK_TYPE_LABELS = {
   filesystem_create: '파일 생성',
   filesystem_update: '파일 수정',
   filesystem_backup: '파일 백업',
+  filesystem_delete: '파일 삭제',
   email_send:        '이메일 발송',
 }
 
