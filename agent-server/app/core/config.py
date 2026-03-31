@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # ── Claude API ───────────────────────────────────────────────────────────
     ANTHROPIC_API_KEY: str = ""
-    CLAUDE_MODEL: str = "claude-3-5-sonnet-20241022"
+    CLAUDE_MODEL: str = "claude-sonnet-4-6"
     CLAUDE_MAX_TOKENS: int = 8192
 
     # ── Database (PostgreSQL + asyncpg) ──────────────────────────────────────

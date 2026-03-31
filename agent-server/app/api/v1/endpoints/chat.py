@@ -408,34 +408,45 @@ async def _stream_chat(session_id: str, message: str):
                 # ── 순수 텍스트 응답 → 루프 종료 ─────────────────────────────
                 if final_msg.stop_reason == "end_turn":
                     total_tokens = final_msg.usage.input_tokens + final_msg.usage.output_tokens
-                    yield _sse({
-                        "type": "done",
-                        "content": final_text,
-                        "token_usage": get_usage_status(total_tokens),
-                    })
-                    # assistant 메시지 DB 저장
                     db.add(Message(
                         session_id=session_uuid,
                         role="assistant",
                         content=final_text,
                         msg_type="text",
                     ))
-                    break
+                    if session.message_count == 0:
+                        session.title = message[:40]
+                    session.message_count += 2
+                    try:
+                        await db.commit()
+                    except Exception as db_exc:
+                        logger.error("DB commit 실패 (end_turn): %s", db_exc)
+                    # done은 DB 성공/실패 무관하게 반드시 전송 — 미전송 시 커넥션이 열린 채로 남아 버튼 고착
+                    yield _sse({
+                        "type": "done",
+                        "content": final_text,
+                        "token_usage": get_usage_status(total_tokens),
+                    })
+                    return  # 제너레이터 즉시 종료 → 커넥션 닫힘 → clearStreaming() 호출
 
                 # ── tool_use 응답 → 도구 실행 후 계속 ────────────────────────
                 elif final_msg.stop_reason == "tool_use":
                     tool_turns += 1
 
                     # assistant 응답(tool_use 포함) messages에 추가
-                    # Anthropic SDK 버전에 따라 block이 Pydantic 모델 또는 dict일 수 있음
+                    # Anthropic API가 허용하는 필드만 명시적으로 추출 (parsed_output 등 내부 필드 제외)
                     assistant_content = []
                     for block in final_msg.content:
-                        if hasattr(block, "model_dump"):
-                            assistant_content.append(block.model_dump())
-                        elif hasattr(block, "__dict__"):
-                            assistant_content.append({k: v for k, v in vars(block).items() if not k.startswith("_")})
-                        else:
-                            assistant_content.append(block)
+                        if getattr(block, "type", None) == "text":
+                            assistant_content.append({"type": "text", "text": block.text})
+                        elif getattr(block, "type", None) == "tool_use":
+                            assistant_content.append({
+                                "type":  "tool_use",
+                                "id":    block.id,
+                                "name":  block.name,
+                                "input": block.input,
+                            })
+                        # 그 외 block 타입은 건너뜀
                     messages.append({"role": "assistant", "content": assistant_content})
 
                     # tool_use_response DB 저장 (히스토리 재구성용)
@@ -471,26 +482,41 @@ async def _stream_chat(session_id: str, message: str):
                 # ── max_tokens 등 기타 stop_reason ────────────────────────────
                 else:
                     total_tokens = final_msg.usage.input_tokens + final_msg.usage.output_tokens
-                    yield _sse({
-                        "type": "done",
-                        "content": final_text,
-                        "token_usage": get_usage_status(total_tokens),
-                    })
                     db.add(Message(
                         session_id=session_uuid,
                         role="assistant",
                         content=final_text,
                         msg_type="text",
                     ))
-                    break
+                    if session.message_count == 0:
+                        session.title = message[:40]
+                    session.message_count += 2
+                    try:
+                        await db.commit()
+                    except Exception as db_exc:
+                        logger.error("DB commit 실패 (stop_reason=%s): %s", final_msg.stop_reason, db_exc)
+                    yield _sse({
+                        "type": "done",
+                        "content": final_text,
+                        "token_usage": get_usage_status(total_tokens),
+                    })
+                    return  # 제너레이터 즉시 종료
 
             else:
                 # MAX_TOOL_TURNS 초과
+                if session.message_count == 0:
+                    session.title = message[:40]
+                session.message_count += 2
+                try:
+                    await db.commit()
+                except Exception as db_exc:
+                    logger.error("DB commit 실패 (max_tool_turns): %s", db_exc)
                 yield _sse({
                     "type": "error",
                     "message": "도구 호출 최대 횟수를 초과했습니다. 더 구체적인 요청을 시도해 주세요.",
                     "error_code": "max_tool_turns",
                 })
+                return  # 제너레이터 즉시 종료
 
         # ── Anthropic API 예외 처리 ──────────────────────────────────────────
         except anthropic.AuthenticationError:
@@ -520,12 +546,11 @@ async def _stream_chat(session_id: str, message: str):
         except anthropic.APIError as e:
             yield _sse({"type": "error", "message": f"API 오류: {e}", "error_code": "api_error"})
             return
-
-        # 세션 메타 업데이트
-        if session.message_count == 0:
-            session.title = message[:40]
-        session.message_count += 2
-        await db.commit()
+        except Exception as e:
+            # DB 오류 등 예상치 못한 예외 — done/error를 반드시 전송해 커넥션을 닫아 버튼 고착 방지
+            logger.error("예상치 못한 오류: %s(%s)", type(e).__name__, e)
+            yield _sse({"type": "error", "message": "서버 내부 오류가 발생했습니다.", "error_code": "server_error"})
+            return
 
 
 # ── 라우터 ────────────────────────────────────────────────────────────────────

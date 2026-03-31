@@ -3,6 +3,7 @@
 """
 import os
 import shutil
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -29,14 +30,23 @@ except ImportError:
 
 # ── 경로 검증 ──────────────────────────────────────────────────────────────────
 
+def _nfc(p: Path) -> str:
+    """macOS APFS는 경로를 NFD로 반환하고 Python str은 NFC — 양쪽을 NFC로 통일."""
+    return unicodedata.normalize("NFC", str(p))
+
+
 def _assert_allowed(path: str) -> Path:
-    p = Path(path).resolve()
-    allowed = [Path(d).resolve() for d in settings.ALLOWED_DIRECTORIES]
+    p = Path(path.strip()).resolve()
+    allowed = [Path(d.strip()).resolve() for d in settings.ALLOWED_DIRECTORIES if d.strip()]
     if not allowed:
         return p  # 허용 경로 미설정 시 전체 허용 (개발 환경)
-    if not any(str(p).startswith(str(a)) for a in allowed):
-        raise PathNotAllowedError(path)
-    return p
+    p_str = _nfc(p)
+    for a in allowed:
+        a_str = _nfc(a)
+        # os.sep 경계 검사 — /foo/bar2 가 /foo/bar 허용 시 통과되는 오류 방지
+        if p_str == a_str or p_str.startswith(a_str + os.sep):
+            return p
+    raise PathNotAllowedError(path)
 
 
 def _full_path(parent: Path, name: str) -> str:

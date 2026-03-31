@@ -21,6 +21,14 @@ router = APIRouter()
 # 암호화가 필요한 설정 키 목록
 _SENSITIVE_KEYS = {"anthropic_api_key", "smtp_password", "brave_api_key", "naver_api_key"}
 
+# 더 이상 유효하지 않은 Claude 모델 ID 목록 (DB에 저장된 구버전 값 무시)
+_DEPRECATED_MODELS = {
+    "claude-3-5-sonnet-20241022",
+    "claude-3-opus-20240229",
+    "claude-3-sonnet-20240229",
+    "claude-3-haiku-20240307",
+}
+
 # DB 키 → runtime settings 속성명 매핑
 _KEY_TO_ATTR: dict[str, str] = {
     "anthropic_api_key":   "ANTHROPIC_API_KEY",
@@ -55,9 +63,12 @@ async def load_settings_from_db(db: AsyncSession) -> None:
                 value = json.loads(value) if value else []
             elif row.key == "smtp_port":
                 value = int(value) if value else 587
+            elif row.key == "claude_model" and value in _DEPRECATED_MODELS:
+                logger.warning("DB의 claude_model(%s)은 더 이상 유효하지 않습니다. 기본값을 사용합니다.", value)
+                continue
             object.__setattr__(settings, attr, value)
         except Exception as exc:
-            logger.warning("settings 로드 실패 key=%s: %s", row.key, exc)
+            logger.warning("settings 로드 실패 key=%s: %s(%s)", row.key, type(exc).__name__, exc)
 
 
 async def _upsert_setting(db: AsyncSession, key: str, value: str, is_encrypted: bool) -> None:
