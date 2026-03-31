@@ -28,6 +28,9 @@ export default function MessageInput({ onSend, onCancel }) {
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
+      // 한국어/일본어/중국어 IME 조합 중 Enter는 글자 확정 단계이므로 전송하지 않음
+      // isComposing=true 상태에서 return 후 IME가 조합을 완료하면 다시 Enter로 전송
+      if (e.nativeEvent?.isComposing) return
       e.preventDefault()
       handleSend()
     }

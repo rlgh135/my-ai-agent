@@ -369,13 +369,19 @@ async def _stream_chat(session_id: str, message: str):
         messages = _build_history(history)
         messages.append({"role": "user", "content": message})
 
-        # 사용자 메시지 DB 저장
+        # 사용자 메시지 DB 저장 — Claude API 호출 전에 즉시 커밋하여
+        # 장시간 대기 중 asyncpg 커넥션 만료로 인한 commit 실패 방지
         db.add(Message(
             session_id=session_uuid,
             role="user",
             content=message,
             msg_type="text",
         ))
+        is_first_message = (session.message_count == 0)
+        try:
+            await db.commit()
+        except Exception as exc:
+            logger.error("사용자 메시지 DB 저장 실패: %s", exc)
 
         # 초기 토큰 사용량 전송
         used = count_messages_tokens(messages)
@@ -414,7 +420,7 @@ async def _stream_chat(session_id: str, message: str):
                         content=final_text,
                         msg_type="text",
                     ))
-                    if session.message_count == 0:
+                    if is_first_message:
                         session.title = message[:40]
                     session.message_count += 2
                     try:
@@ -471,13 +477,18 @@ async def _stream_chat(session_id: str, message: str):
                     # tool_result messages에 추가
                     messages.append({"role": "user", "content": tool_results})
 
-                    # tool_result DB 저장
+                    # tool_result DB 저장 후 즉시 커밋 — 도구 메시지는 각 턴마다 저장하여
+                    # 다음 Claude API 호출 전 커넥션을 해제하고 트랜잭션 만료 방지
                     db.add(Message(
                         session_id=session_uuid,
                         role="user",
                         content=json.dumps(tool_results, ensure_ascii=False),
                         msg_type="tool_result",
                     ))
+                    try:
+                        await db.commit()
+                    except Exception as exc:
+                        logger.error("도구 메시지 DB 저장 실패 (turn %d): %s", tool_turns, exc)
 
                 # ── max_tokens 등 기타 stop_reason ────────────────────────────
                 else:
@@ -488,7 +499,7 @@ async def _stream_chat(session_id: str, message: str):
                         content=final_text,
                         msg_type="text",
                     ))
-                    if session.message_count == 0:
+                    if is_first_message:
                         session.title = message[:40]
                     session.message_count += 2
                     try:
@@ -504,7 +515,7 @@ async def _stream_chat(session_id: str, message: str):
 
             else:
                 # MAX_TOOL_TURNS 초과
-                if session.message_count == 0:
+                if is_first_message:
                     session.title = message[:40]
                 session.message_count += 2
                 try:
