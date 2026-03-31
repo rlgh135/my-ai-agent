@@ -4,12 +4,26 @@ import { useSessionStore } from '@/store/sessionStore'
 import { useTaskStore } from '@/store/taskStore'
 
 /**
+ * 백엔드가 snake_case로 전송하는 토큰 usage 데이터를
+ * TokenBadge / chatStore가 기대하는 camelCase로 변환한다.
+ */
+function normalizeTokenUsage(raw) {
+  return {
+    usedTokens:   raw.used_tokens   ?? raw.usedTokens   ?? 0,
+    maxTokens:    raw.max_tokens    ?? raw.maxTokens     ?? 200_000,
+    usagePercent: raw.usage_percent ?? raw.usagePercent  ?? 0,
+    status:       raw.status ?? 'normal',
+  }
+}
+
+/**
  * useSSE — POST /api/chat SSE 스트리밍 전송
  * 이벤트 타입:
- *   data: { type: 'delta', content: '...' }
- *   data: { type: 'done', content: '...' , token_usage: {...} }
- *   data: { type: 'task_pending', task: { id, description, ... } }
- *   data: { type: 'error', message: '...' }
+ *   data: { type: 'delta',       content: '...' }
+ *   data: { type: 'done',        content: '...', token_usage: {...} }
+ *   data: { type: 'token_usage', used_tokens, max_tokens, usage_percent, status }
+ *   data: { type: 'task_pending', task: { id, type, description, payload, createdAt } }
+ *   data: { type: 'error',       message: '...', error_code: '...' }
  */
 export function useSSE() {
   const abortRef = useRef(null)
@@ -18,9 +32,6 @@ export function useSSE() {
   const { addPendingTask } = useTaskStore()
 
   const sendMessage = useCallback(async (userMessage) => {
-    // 스토어에서 직접 최신 activeSessionId를 읽는다.
-    // useCallback 클로저로 캡처하면 createSession() 직후 stale 값이 남아
-    // 첫 메시지가 전송되지 않는 문제가 생긴다.
     const { activeSessionId } = useSessionStore.getState()
     if (!activeSessionId) return
 
@@ -68,7 +79,7 @@ export function useSSE() {
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
-        buffer = lines.pop() // 마지막 불완전 줄 보관
+        buffer = lines.pop()
 
         for (const line of lines) {
           if (!line.startsWith('data:')) continue
@@ -81,9 +92,16 @@ export function useSSE() {
           if (event.type === 'delta') {
             updateLastAssistantMessage(event.content)
 
+          } else if (event.type === 'token_usage') {
+            // 스트리밍 시작 시 초기 토큰 사용량 (히스토리 기반 근사값)
+            setTokenUsage(normalizeTokenUsage(event))
+
           } else if (event.type === 'done') {
             finalizeAssistantMessage(event.content)
-            if (event.token_usage) setTokenUsage(event.token_usage)
+            if (event.token_usage) {
+              // 실제 API 응답 기반 정확한 사용량
+              setTokenUsage(normalizeTokenUsage(event.token_usage))
+            }
 
           } else if (event.type === 'task_pending') {
             addPendingTask(event.task)
@@ -91,11 +109,12 @@ export function useSSE() {
           } else if (event.type === 'error') {
             const icons = {
               insufficient_credits: '💳',
-              auth_failed: '🔑',
-              rate_limit: '⏱️',
-              permission_denied: '🚫',
-              connection_error: '🌐',
-              server_error: '🖥️',
+              auth_failed:          '🔑',
+              rate_limit:           '⏱️',
+              permission_denied:    '🚫',
+              connection_error:     '🌐',
+              server_error:         '🖥️',
+              max_tool_turns:       '🔄',
             }
             const icon = icons[event.error_code] || '⚠️'
             finalizeAssistantMessage(`${icon} ${event.message}`)
@@ -110,7 +129,6 @@ export function useSSE() {
       clearStreaming()
       abortRef.current = null
     }
-  // activeSessionId를 dependency에서 제거 — 매 호출 시 getState()로 최신 값을 읽는다
   }, [appendMessage, updateLastAssistantMessage, finalizeAssistantMessage, setStreaming, clearStreaming, setTokenUsage, addPendingTask])
 
   const cancel = useCallback(() => {

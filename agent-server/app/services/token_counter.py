@@ -38,16 +38,37 @@ def count_messages_tokens(messages: list[dict]) -> int:
     return total
 
 
-MAX_TOKENS = {
-    "claude-3-5-sonnet-20241022": 200_000,
-    "claude-3-opus-20240229":     200_000,
-    "claude-3-haiku-20240307":    200_000,
+MAX_TOKENS: dict[str, int] = {
+    # Claude 4 family (2025)
+    "claude-opus-4-6":              200_000,
+    "claude-opus-4-5":              200_000,
+    "claude-sonnet-4-6":            200_000,
+    "claude-sonnet-4-5":            200_000,
+    # Claude 3.7 / 3.5 / 3
+    "claude-3-7-sonnet-20250219":   200_000,
+    "claude-3-5-sonnet-20241022":   200_000,
+    "claude-3-5-haiku-20241022":    200_000,
+    "claude-3-opus-20240229":       200_000,
+    "claude-3-haiku-20240307":      200_000,
+    # Claude Haiku 4.5
+    "claude-haiku-4-5-20251001":    200_000,
 }
+
+_DEFAULT_MAX = 200_000
 
 
 def get_usage_status(used: int, model: str | None = None) -> dict:
     model = model or settings.CLAUDE_MODEL
-    max_t = MAX_TOKENS.get(model, 200_000)
+    # 접두사 매칭 (예: "claude-sonnet-4-6-20251031" → "claude-sonnet-4-6")
+    max_t = MAX_TOKENS.get(model)
+    if max_t is None:
+        for key, val in MAX_TOKENS.items():
+            if model.startswith(key):
+                max_t = val
+                break
+        else:
+            max_t = _DEFAULT_MAX
+
     pct = round(used / max_t * 100, 1)
     if pct >= 91:
         status = "danger"

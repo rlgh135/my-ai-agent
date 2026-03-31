@@ -1,5 +1,24 @@
 import { create } from 'zustand'
 import * as sessionApi from '@/api/sessions'
+import * as chatApi from '@/api/chat'
+import { useChatStore } from '@/store/chatStore'
+
+/** 백엔드 snake_case → camelCase 변환 (chatStore / TokenBadge 기대 형식) */
+function normalizeTokenUsage(raw) {
+  return {
+    usedTokens:   raw.used_tokens   ?? raw.usedTokens   ?? 0,
+    maxTokens:    raw.max_tokens    ?? raw.maxTokens     ?? 200_000,
+    usagePercent: raw.usage_percent ?? raw.usagePercent  ?? 0,
+    status:       raw.status ?? 'normal',
+  }
+}
+
+const EMPTY_TOKEN_USAGE = {
+  status: 'normal',
+  usagePercent: 0,
+  usedTokens: 0,
+  maxTokens: 200_000,
+}
 
 export const useSessionStore = create((set, get) => ({
   sessions: [],
@@ -12,7 +31,6 @@ export const useSessionStore = create((set, get) => ({
     set({ isLoadingSessions: true })
     try {
       const data = await sessionApi.listSessions()
-      // 백엔드 응답: { sessions: [...], total: N }
       set({ sessions: Array.isArray(data) ? data : (data.sessions ?? []) })
     } finally {
       set({ isLoadingSessions: false })
@@ -21,17 +39,34 @@ export const useSessionStore = create((set, get) => ({
 
   createSession: async (title = '새 대화') => {
     const session = await sessionApi.createSession({ title })
+    // 새 세션: 토큰 사용량 초기화
+    useChatStore.getState().setTokenUsage(EMPTY_TOKEN_USAGE)
     set(s => ({ sessions: [session, ...s.sessions], activeSessionId: session.id, messages: [] }))
     return session
   },
 
   selectSession: async (sessionId) => {
     if (get().activeSessionId === sessionId) return
+
+    // 전환 즉시 토큰 배지 초기화 (이전 세션 잔상 제거)
+    useChatStore.getState().setTokenUsage(EMPTY_TOKEN_USAGE)
     set({ activeSessionId: sessionId, messages: [], isLoadingMessages: true })
+
     try {
-      const data = await sessionApi.getMessages(sessionId)
-      // 백엔드 응답: { session_id: '...', messages: [...] }
-      set({ messages: Array.isArray(data) ? data : (data.messages ?? []) })
+      // 메시지 로드 + 토큰 사용량 병렬 조회
+      const [msgData, tokenData] = await Promise.allSettled([
+        sessionApi.getMessages(sessionId),
+        chatApi.getTokenUsage(sessionId),
+      ])
+
+      if (msgData.status === 'fulfilled') {
+        const raw = msgData.value
+        set({ messages: Array.isArray(raw) ? raw : (raw.messages ?? []) })
+      }
+
+      if (tokenData.status === 'fulfilled' && tokenData.value) {
+        useChatStore.getState().setTokenUsage(normalizeTokenUsage(tokenData.value))
+      }
     } finally {
       set({ isLoadingMessages: false })
     }
@@ -44,6 +79,10 @@ export const useSessionStore = create((set, get) => ({
       const activeSessionId = s.activeSessionId === sessionId
         ? (sessions[0]?.id ?? null)
         : s.activeSessionId
+      // 삭제 후 활성 세션 없으면 토큰 배지 초기화
+      if (activeSessionId === null) {
+        useChatStore.getState().setTokenUsage(EMPTY_TOKEN_USAGE)
+      }
       return { sessions, activeSessionId, messages: activeSessionId === null ? [] : s.messages }
     })
   },
