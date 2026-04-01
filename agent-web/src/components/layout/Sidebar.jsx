@@ -1,19 +1,27 @@
-import { useEffect } from 'react'
-import { MessageSquare, FolderOpen, Settings, Plus, Trash2, Bot } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { MessageSquare, FolderOpen, Settings, Plus, Trash2, Bot, AlertTriangle } from 'lucide-react'
 import clsx from 'clsx'
 import { useSessionStore } from '@/store/sessionStore'
 import { useUiStore } from '@/store/uiStore'
 import { relativeTime } from '@/utils/formatters'
+import Modal from '@/components/common/Modal'
 
 export default function Sidebar() {
   const { sessions, activeSessionId, isLoadingSessions, fetchSessions, createSession, selectSession, deleteSession } = useSessionStore()
   const { view, setView, sidebarCollapsed } = useUiStore()
+  const [confirmTarget, setConfirmTarget] = useState(null) // 삭제 확인 대상 session
 
   useEffect(() => { fetchSessions() }, [fetchSessions])
 
   const handleNewChat = async () => {
     await createSession()
     setView('chat')
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!confirmTarget) return
+    await deleteSession(confirmTarget.id)
+    setConfirmTarget(null)
   }
 
   return (
@@ -69,7 +77,7 @@ export default function Sidebar() {
               session={session}
               active={session.id === activeSessionId}
               onSelect={() => { selectSession(session.id); setView('chat') }}
-              onDelete={() => deleteSession(session.id)}
+              onDelete={() => setConfirmTarget(session)}
             />
           ))
         )}
@@ -82,6 +90,52 @@ export default function Sidebar() {
         <NavBtn icon={<Settings size={15} />} label="설정" active={view === 'settings'} onClick={() => setView('settings')} />
       </div>
     </aside>
+
+    {/* 삭제 확인 모달 */}
+    <Modal
+      open={!!confirmTarget}
+      onClose={() => setConfirmTarget(null)}
+      title="대화 삭제"
+      maxWidth="max-w-sm"
+    >
+      <div className="flex flex-col gap-4">
+        <div className="flex items-start gap-3">
+          <AlertTriangle size={18} className="shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
+          <div>
+            <p className="text-sm" style={{ color: 'var(--color-ink-700)' }}>
+              <strong className="font-medium" style={{ color: 'var(--color-ink-900)' }}>
+                "{confirmTarget?.title || '새 대화'}"
+              </strong>{' '}
+              대화를 삭제하시겠습니까?
+            </p>
+            <p className="text-xs mt-1" style={{ color: 'var(--color-ink-400)' }}>
+              삭제된 대화는 복구할 수 없습니다.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => setConfirmTarget(null)}
+            className="px-4 py-1.5 rounded-lg text-sm border transition-colors"
+            style={{
+              borderColor: 'var(--color-surface-300)',
+              color: 'var(--color-ink-600)',
+              background: 'var(--color-surface-100)',
+            }}
+          >
+            취소
+          </button>
+          <button
+            onClick={handleDeleteConfirm}
+            className="px-4 py-1.5 rounded-lg text-sm font-medium text-white transition-colors"
+            style={{ background: '#dc2626' }}
+          >
+            삭제
+          </button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
