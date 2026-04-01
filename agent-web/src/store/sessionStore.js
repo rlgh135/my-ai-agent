@@ -31,7 +31,12 @@ export const useSessionStore = create((set, get) => ({
     set({ isLoadingSessions: true })
     try {
       const data = await sessionApi.listSessions()
-      set({ sessions: Array.isArray(data) ? data : (data.sessions ?? []) })
+      const sessions = Array.isArray(data) ? data : (data.sessions ?? [])
+      set({ sessions })
+      // 새로고침 후 activeSessionId가 없으면 가장 최근 세션 자동 복원
+      if (!get().activeSessionId && sessions.length > 0) {
+        await get().selectSession(sessions[0].id)
+      }
     } finally {
       set({ isLoadingSessions: false })
     }
