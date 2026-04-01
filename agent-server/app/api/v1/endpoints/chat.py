@@ -157,7 +157,7 @@ _RISKY_TOOLS: dict[str, str] = {
     "send_email":  "email_send",
 }
 
-SYSTEM_PROMPT = """당신은 SI 개발자를 위한 로컬 AI 에이전트입니다.
+_SYSTEM_PROMPT_BASE = """당신은 SI 개발자를 위한 로컬 AI 에이전트입니다.
 사용자의 자연어 지시를 받아 파일 탐색/생성/수정/백업, 이메일 전송, 웹 검색 등의 작업을 수행합니다.
 
 규칙:
@@ -165,6 +165,30 @@ SYSTEM_PROMPT = """당신은 SI 개발자를 위한 로컬 AI 에이전트입니
 - 파일 수정(update_file) 전에는 항상 백업(backup_file)을 먼저 요청하십시오.
 - 읽기 전용 작업(web_search, list_directory, read_file)은 즉시 수행합니다.
 - 작업 결과를 한국어로 사용자에게 명확히 알려주십시오."""
+
+
+def _build_system_prompt() -> str:
+    """허용 디렉토리 설정을 반영한 system prompt를 런타임에 생성.
+
+    첫 번째 허용 경로가 기본 작업 디렉토리로 LLM에 전달된다.
+    사용자가 경로를 명시하지 않은 파일/폴더 요청에 이 경로를 기본값으로 사용하도록 안내.
+    """
+    dirs = [d.strip() for d in settings.ALLOWED_DIRECTORIES if d.strip()]
+    if not dirs:
+        return _SYSTEM_PROMPT_BASE
+
+    default_dir = dirs[0]
+    dir_list = "\n".join(f"  - {d}" for d in dirs)
+
+    directory_section = f"""
+
+파일 시스템 컨텍스트:
+- 접근 가능한 허용 경로:
+{dir_list}
+- 기본 작업 디렉토리: {default_dir}
+- 사용자가 경로를 명시하지 않고 "이 폴더", "현재 폴더", "지금 폴더" 등으로 요청하면 기본 작업 디렉토리({default_dir})를 사용하십시오."""
+
+    return _SYSTEM_PROMPT_BASE + directory_section
 
 
 # ── 헬퍼 함수들 ───────────────────────────────────────────────────────────────
@@ -429,7 +453,7 @@ async def _stream_chat(session_id: str, message: str):
             async with client.messages.stream(
                 model=settings.CLAUDE_MODEL,
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
-                system=SYSTEM_PROMPT,
+                system=_build_system_prompt(),
                 tools=TOOLS,
                 messages=messages,
             ) as stream:
