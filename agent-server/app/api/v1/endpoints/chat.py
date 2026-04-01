@@ -31,8 +31,7 @@ TOOLS: list[dict] = [
         "name": "web_search",
         "description": (
             "웹에서 정보를 검색합니다. "
-            "한국어 쿼리는 Naver API, 영문 쿼리는 Brave API를 우선 사용합니다. "
-            "API 키가 설정되지 않은 경우 DuckDuckGo로 대체합니다."
+            "한국어 쿼리는 Naver API(설정된 경우)를 사용하고, 그 외에는 DuckDuckGo로 검색합니다."
         ),
         "input_schema": {
             "type": "object",
@@ -67,12 +66,19 @@ TOOLS: list[dict] = [
     },
     {
         "name": "create_file",
-        "description": "새 파일을 생성합니다. 실행 전 사용자 승인이 필요합니다.",
+        "description": (
+            "새 파일을 생성합니다. 실행 전 사용자 승인이 필요합니다. "
+            ".docx(Word): content를 마크다운 문법으로 작성하면 Word 서식으로 자동 변환됩니다 "
+            "(# 제목, ## 소제목, **굵게**, *기울임*, - 목록, 1. 번호목록). "
+            ".xlsx(Excel): content를 탭(\\t) 또는 쉼표(,) 구분 텍스트로 작성하면 셀로 분리되며, "
+            "첫 행은 헤더로 굵게 표시됩니다. '=== 시트명 ===' 줄로 다중 시트를 구분할 수 있습니다. "
+            "그 외 확장자는 텍스트 파일로 저장됩니다."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "path":      {"type": "string",  "description": "생성할 파일 절대 경로"},
-                "content":   {"type": "string",  "description": "파일 내용"},
+                "path":      {"type": "string",  "description": "생성할 파일 절대 경로 (.docx/.xlsx/.txt 등)"},
+                "content":   {"type": "string",  "description": "파일 내용. Word는 마크다운 문법, Excel은 탭/쉼표 구분 텍스트로 작성"},
                 "overwrite": {"type": "boolean", "description": "동명 파일 덮어쓰기 여부 (기본 false)"},
             },
             "required": ["path", "content"],
@@ -81,15 +87,16 @@ TOOLS: list[dict] = [
     {
         "name": "update_file",
         "description": (
-            "기존 파일을 수정합니다. "
-            "수정 전 자동으로 백업 파일이 생성됩니다. "
-            "실행 전 사용자 승인이 필요합니다."
+            "기존 파일을 수정합니다. 수정 전 자동으로 백업 파일이 생성됩니다. "
+            "실행 전 사용자 승인이 필요합니다. "
+            "create_file과 동일한 포맷 규칙이 적용됩니다: "
+            ".docx는 마크다운 문법, .xlsx는 탭/쉼표 구분 텍스트로 작성하세요."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "path":    {"type": "string", "description": "수정할 파일 절대 경로"},
-                "content": {"type": "string", "description": "새로운 파일 전체 내용"},
+                "path":    {"type": "string", "description": "수정할 파일 절대 경로 (.docx/.xlsx/.txt 등)"},
+                "content": {"type": "string", "description": "새로운 파일 전체 내용. Word는 마크다운 문법, Excel은 탭/쉼표 구분 텍스트로 작성"},
             },
             "required": ["path", "content"],
         },
@@ -174,11 +181,11 @@ def _get_client() -> anthropic.AsyncAnthropic:
 
 def _build_history(messages_from_db: list) -> list[dict]:
     """DB 메시지 목록에서 Anthropic API 형식의 messages 배열 재구성.
-    tool_use_response / tool_result 타입은 JSON으로 저장되어 있어 파싱 후 반환.
+    tool_use / tool_result 타입은 JSON으로 저장되어 있어 파싱 후 반환.
     """
     result = []
     for m in messages_from_db:
-        if m.msg_type in ("tool_use_response", "tool_result"):
+        if m.msg_type in ("tool_use", "tool_result"):
             try:
                 content = json.loads(m.content)
             except (json.JSONDecodeError, TypeError):
@@ -489,7 +496,7 @@ async def _stream_chat(session_id: str, message: str):
                         {
                             "session_id": session_uuid, "role": "assistant",
                             "content": json.dumps(assistant_content, ensure_ascii=False),
-                            "msg_type": "tool_use_response",
+                            "msg_type": "tool_use",
                         },
                         {
                             "session_id": session_uuid, "role": "user",

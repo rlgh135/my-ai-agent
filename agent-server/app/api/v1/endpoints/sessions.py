@@ -53,9 +53,14 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
     session = await db.get(ChatSession, session_uuid)
     if not session:
         raise SessionNotFoundError(session_id)
+    # tool_use / tool_result 은 Claude API 내부 통신용 — 화면에 표시하지 않음
+    _DISPLAY_TYPES = ("text", "task_pending")
     result = await db.execute(
         select(Message)
-        .where(Message.session_id == session_uuid)
+        .where(
+            Message.session_id == session_uuid,
+            Message.msg_type.in_(_DISPLAY_TYPES),
+        )
         .order_by(Message.created_at)
     )
     messages = result.scalars().all()

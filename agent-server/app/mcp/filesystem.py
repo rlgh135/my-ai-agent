@@ -2,6 +2,7 @@
 지원 포맷: 텍스트 (utf-8), Word (.docx), Excel (.xlsx)
 """
 import os
+import re
 import shutil
 import unicodedata
 from datetime import datetime
@@ -182,29 +183,135 @@ def update_file(path: str, content: str) -> dict:
 
 
 def _write_docx(p: Path, content: str) -> None:
+    """마크다운 문법을 파싱하여 Word 서식으로 변환 후 저장.
+
+    지원 문법:
+      # ~ ####  → Heading 1~4
+      - / *     → 글머리 기호 목록 (List Bullet)
+      1. 2. …   → 번호 목록 (List Number)
+      **text**  → 굵게
+      *text*    → 기울임
+      ***text***→ 굵게+기울임
+      ---       → 단락 구분 (빈 줄)
+      빈 줄      → 단락 간격
+    """
     if not _DOCX_OK:
         raise RuntimeError("python-docx 미설치 — pip install python-docx")
+
     doc = _docx.Document()
+
     for line in content.splitlines():
-        doc.add_paragraph(line)
+        stripped = line.rstrip()
+
+        if stripped.startswith("#### "):
+            _docx_paragraph(doc, stripped[5:], "Heading 4")
+        elif stripped.startswith("### "):
+            _docx_paragraph(doc, stripped[4:], "Heading 3")
+        elif stripped.startswith("## "):
+            _docx_paragraph(doc, stripped[3:], "Heading 2")
+        elif stripped.startswith("# "):
+            _docx_paragraph(doc, stripped[2:], "Heading 1")
+        elif re.match(r"^[-*] ", stripped):
+            _docx_paragraph(doc, stripped[2:], "List Bullet")
+        elif re.match(r"^\d+\.\s", stripped):
+            text = re.sub(r"^\d+\.\s+", "", stripped)
+            _docx_paragraph(doc, text, "List Number")
+        elif stripped in ("---", "***", "___"):
+            doc.add_paragraph()   # 수평선 → 빈 단락으로 대체
+        elif not stripped:
+            doc.add_paragraph()
+        else:
+            _docx_paragraph(doc, stripped, "Normal")
+
     doc.save(str(p))
+
+
+def _docx_paragraph(doc, text: str, style: str):
+    """스타일이 적용된 단락에 인라인 마크다운 서식(**bold**, *italic*)을 추가."""
+    para = doc.add_paragraph(style=style)
+    _docx_inline(para, text)
+    return para
+
+
+def _docx_inline(para, text: str) -> None:
+    """***bold+italic***, **bold**, *italic* 인라인 서식을 Run으로 분해하여 적용."""
+    pattern = re.compile(r"\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*")
+    last = 0
+    for m in pattern.finditer(text):
+        if m.start() > last:
+            para.add_run(text[last:m.start()])
+        if m.group(1):          # ***bold+italic***
+            run = para.add_run(m.group(1))
+            run.bold = True
+            run.italic = True
+        elif m.group(2):        # **bold**
+            run = para.add_run(m.group(2))
+            run.bold = True
+        elif m.group(3):        # *italic*
+            run = para.add_run(m.group(3))
+            run.italic = True
+        last = m.end()
+    if last < len(text):
+        para.add_run(text[last:])
 
 
 def _write_xlsx(p: Path, content: str) -> None:
     """탭 또는 쉼표로 구분된 텍스트를 xlsx로 저장.
-    첫 번째 구분자 우선: 탭 → 쉼표 → 단일 셀.
+
+    지원 기능:
+      - 첫 행 굵게 + 가운데 정렬 (헤더로 간주)
+      - 열 너비 자동 조정
+      - '=== 시트명 ===' 줄로 다중 시트 구분
     """
     if not _XLSX_OK:
         raise RuntimeError("openpyxl 미설치 — pip install openpyxl")
+
+    from openpyxl.styles import Alignment, Font
+
     wb = _openpyxl.Workbook()
     ws = wb.active
+    ws.title = "Sheet1"
+    is_first_row = True
+
     for line in content.splitlines():
+        stripped = line.strip()
+
+        # === 시트명 === → 새 시트 전환
+        m = re.match(r"^===\s*(.+?)\s*===$", stripped)
+        if m:
+            sheet_title = m.group(1)[:31]
+            if ws.max_row == 0:
+                ws.title = sheet_title
+            else:
+                ws = wb.create_sheet(title=sheet_title)
+            is_first_row = True
+            continue
+
+        if not stripped:
+            continue
+
         if "\t" in line:
-            ws.append(line.split("\t"))
-        elif "," in line:
-            ws.append(line.split(","))
+            cells = line.split("\t")
+        elif "," in stripped:
+            cells = [c.strip() for c in stripped.split(",")]
         else:
-            ws.append([line])
+            cells = [stripped]
+
+        row_idx = ws.max_row + 1
+        for col_idx, val in enumerate(cells, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            if is_first_row:
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal="center")
+
+        is_first_row = False
+
+    # 열 너비 자동 조정 (최대 50)
+    for sheet in wb.worksheets:
+        for col in sheet.columns:
+            max_len = max((len(str(cell.value or "")) for cell in col), default=0)
+            sheet.column_dimensions[col[0].column_letter].width = min(max_len + 4, 50)
+
     wb.save(str(p))
 
 
