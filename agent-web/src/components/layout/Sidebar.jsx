@@ -25,6 +25,7 @@ export default function Sidebar() {
   }
 
   return (
+    <>
     <aside
       className={clsx(
         'flex flex-col h-full shrink-0 transition-all duration-200',
@@ -136,6 +137,7 @@ export default function Sidebar() {
         </div>
       </div>
     </Modal>
+    </>
   )
 }
 
