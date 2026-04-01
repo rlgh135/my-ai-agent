@@ -61,7 +61,9 @@ export const useSessionStore = create((set, get) => ({
 
       if (msgData.status === 'fulfilled') {
         const raw = msgData.value
-        set({ messages: Array.isArray(raw) ? raw : (raw.messages ?? []) })
+        const list = Array.isArray(raw) ? raw : (raw.messages ?? [])
+        // 백엔드 snake_case → 프론트엔드 camelCase 정규화
+        set({ messages: list.map(m => ({ ...m, createdAt: m.createdAt ?? m.created_at })) })
       }
 
       if (tokenData.status === 'fulfilled' && tokenData.value) {

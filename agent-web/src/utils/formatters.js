@@ -2,7 +2,9 @@
  * 상대 시간 표시 (예: "방금 전", "3분 전", "어제")
  */
 export function relativeTime(isoString) {
+  if (!isoString) return ''
   const date = new Date(isoString)
+  if (isNaN(date.getTime())) return ''
   const now = new Date()
   const diffMs = now - date
   const diffMin = Math.floor(diffMs / 60000)
