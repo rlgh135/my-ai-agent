@@ -41,7 +41,14 @@ export default function App() {
       <Sidebar />
 
       {/* 메인 영역 */}
-      <div className="flex flex-col flex-1 overflow-hidden">
+      <div
+        className="flex flex-col overflow-hidden"
+        style={{
+          flex: '0 1 var(--chat-max-w)',
+          minWidth: '320px',
+          margin: '0 auto',
+        }}
+      >
         {/* 헤더 */}
         <Header />
 

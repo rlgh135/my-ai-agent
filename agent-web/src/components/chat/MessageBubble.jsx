@@ -14,8 +14,8 @@ export default function MessageBubble({ message }) {
       {/* 아바타 */}
       <Avatar isUser={isUser} />
 
-      {/* 버블 */}
-      <div className={`flex flex-col gap-1 max-w-[75%] ${isUser ? 'items-end' : 'items-start'}`}>
+      {/* 본문 */}
+      <div className={`flex flex-col gap-1 ${isUser ? 'items-end max-w-[70%]' : 'items-start flex-1 min-w-0'}`}>
         {isUser ? (
           <UserBubble message={message} />
         ) : (
@@ -32,10 +32,10 @@ export default function MessageBubble({ message }) {
 function Avatar({ isUser }) {
   return (
     <div
-      className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold"
-      style={{ background: isUser ? 'var(--color-navy-800)' : 'var(--color-brand-600)' }}
+      className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold mt-0.5"
+      style={{ background: isUser ? 'var(--color-navy-700)' : 'var(--color-brand-600)' }}
     >
-      {isUser ? <User size={14} /> : <Bot size={14} />}
+      {isUser ? <User size={13} /> : <Bot size={13} />}
     </div>
   )
 }
@@ -43,11 +43,11 @@ function Avatar({ isUser }) {
 function UserBubble({ message }) {
   return (
     <div
-      className="px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm"
+      className="px-4 py-2.5 rounded-2xl rounded-tr-md text-sm whitespace-pre-wrap"
       style={{
         background: 'var(--color-navy-900)',
         color: '#e2e8f0',
-        lineHeight: 1.6,
+        lineHeight: 1.65,
       }}
     >
       {message.content}
@@ -57,14 +57,7 @@ function UserBubble({ message }) {
 
 function AssistantBubble({ message }) {
   return (
-    <div
-      className="px-4 py-3 rounded-2xl rounded-tl-sm border"
-      style={{
-        background: 'var(--color-surface-0)',
-        borderColor: 'var(--color-surface-200)',
-        minWidth: '120px',
-      }}
-    >
+    <div className="w-full py-1">
       {message.streaming && !message.content ? (
         <ThinkingDots />
       ) : (

@@ -35,13 +35,13 @@ export default function ChatWindow() {
       <SmtpStatusBanner />
 
       {/* 메시지 영역 */}
-      <div className="flex-1 overflow-y-auto px-6 py-6" style={{ background: 'var(--color-surface-50)' }}>
+      <div className="flex-1 overflow-y-auto" style={{ background: 'var(--color-surface-50)' }}>
         {isLoadingMessages ? (
           <LoadingSkeleton />
         ) : messages.length === 0 ? (
           <EmptyState onNewChat={handleSend} />
         ) : (
-          <div className="max-w-3xl mx-auto flex flex-col gap-6">
+          <div className="flex flex-col gap-5 px-4 pt-4 pb-6">
             {messages.map(msg => (
               <MessageBubble key={msg.id} message={msg} />
             ))}
@@ -91,22 +91,22 @@ function EmptyState({ onNewChat }) {
   ]
 
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-6 py-16">
-      <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
-        style={{ background: 'var(--color-brand-100)' }}>
-        <MessageSquare size={24} style={{ color: 'var(--color-brand-600)' }} />
-      </div>
+    <div className="flex flex-col items-center justify-center h-full gap-8 px-6">
       <div className="text-center">
-        <h2 className="text-base font-semibold mb-1" style={{ color: 'var(--color-ink-900)' }}>
+        <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4"
+          style={{ background: 'var(--color-brand-100)' }}>
+          <MessageSquare size={22} style={{ color: 'var(--color-brand-600)' }} />
+        </div>
+        <h2 className="text-lg font-semibold mb-1.5" style={{ color: 'var(--color-ink-900)' }}>
           무엇을 도와드릴까요?
         </h2>
-        <p className="text-sm" style={{ color: 'var(--color-ink-500)' }}>
+        <p className="text-sm" style={{ color: 'var(--color-ink-400)' }}>
           파일 작업, 웹 검색, 이메일 발송 등을 도와드립니다
         </p>
       </div>
 
       {/* 제안 카드 */}
-      <div className="grid grid-cols-2 gap-2.5 w-full max-w-lg">
+      <div className="grid grid-cols-2 gap-2 w-full">
         {suggestions.map(s => (
           <button
             key={s}
@@ -115,10 +115,10 @@ function EmptyState({ onNewChat }) {
             style={{
               background: 'var(--color-surface-0)',
               borderColor: 'var(--color-surface-200)',
-              color: 'var(--color-ink-700)',
+              color: 'var(--color-ink-600)',
             }}
           >
-            <Plus size={12} className="mb-1" style={{ color: 'var(--color-brand-500)' }} />
+            <Plus size={11} className="mb-1.5" style={{ color: 'var(--color-brand-400)' }} />
             {s}
           </button>
         ))}

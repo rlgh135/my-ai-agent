@@ -52,97 +52,96 @@ export default function MessageInput({ onSend, onCancel }) {
 
   return (
     <div
-      className="border-t px-4 py-3"
-      style={{ background: 'var(--color-surface-0)', borderColor: 'var(--color-surface-200)' }}
+      className="px-4 pb-4 pt-2"
+      style={{ background: 'var(--color-surface-50)' }}
     >
-      {/* 빠른 명령 힌트 */}
-      {showHints && (
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {QUICK_COMMANDS.map(cmd => (
-            <button
-              key={cmd.label}
-              onClick={() => applyQuickCommand(cmd)}
-              className="px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors border"
-              style={{
-                background: 'var(--color-surface-50)',
-                borderColor: 'var(--color-surface-300)',
-                color: 'var(--color-ink-700)',
-              }}
-            >
-              {cmd.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* 입력창 */}
-      <div
-        className="flex items-end gap-2 rounded-xl border px-3 py-2 transition-colors"
-        style={{
-          background: 'var(--color-surface-100)',
-          borderColor: 'var(--color-surface-300)',
-        }}
-      >
-        {/* 빠른 명령 토글 */}
-        <button
-          onClick={() => setShowHints(v => !v)}
-          className="p-1 rounded-md shrink-0 mb-0.5 transition-colors"
-          style={{ color: showHints ? 'var(--color-brand-600)' : 'var(--color-ink-300)' }}
-          title="빠른 명령"
-        >
-          <Paperclip size={16} />
-        </button>
-
-        {/* 텍스트 영역 */}
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={handleInput}
-          onKeyDown={handleKeyDown}
-          placeholder="메시지를 입력하세요… (Shift+Enter: 줄바꿈)"
-          rows={1}
-          className="flex-1 resize-none bg-transparent text-sm outline-none leading-relaxed"
-          style={{
-            color: 'var(--color-ink-900)',
-            minHeight: '24px',
-            maxHeight: '160px',
-          }}
-        />
-
-        {/* 전송 / 중지 버튼 */}
-        {isStreaming ? (
-          <button
-            onClick={onCancel}
-            className="p-1.5 rounded-lg shrink-0 mb-0.5 transition-colors"
-            style={{ background: 'var(--color-danger-500)', color: '#fff' }}
-            title="생성 중지"
-          >
-            <Square size={14} />
-          </button>
-        ) : (
-          <button
-            onClick={handleSend}
-            disabled={!value.trim()}
-            className={clsx(
-              'p-1.5 rounded-lg shrink-0 mb-0.5 transition-colors',
-              value.trim()
-                ? 'text-white'
-                : 'cursor-not-allowed'
-            )}
-            style={{
-              background: value.trim() ? 'var(--color-brand-600)' : 'var(--color-surface-200)',
-              color: value.trim() ? '#fff' : 'var(--color-ink-300)',
-            }}
-            title="전송 (Enter)"
-          >
-            <Send size={14} />
-          </button>
+      <div>
+        {/* 빠른 명령 힌트 */}
+        {showHints && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {QUICK_COMMANDS.map(cmd => (
+              <button
+                key={cmd.label}
+                onClick={() => applyQuickCommand(cmd)}
+                className="px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors border"
+                style={{
+                  background: 'var(--color-surface-0)',
+                  borderColor: 'var(--color-surface-300)',
+                  color: 'var(--color-ink-600)',
+                }}
+              >
+                {cmd.label}
+              </button>
+            ))}
+          </div>
         )}
-      </div>
 
-      <p className="mt-1.5 text-[10px] text-center" style={{ color: 'var(--color-ink-300)' }}>
-        AI는 실수할 수 있습니다. 중요한 파일은 반드시 백업하세요.
-      </p>
+        {/* 입력창 */}
+        <div
+          className="flex items-end gap-2 rounded-2xl border px-4 py-3 transition-colors"
+          style={{
+            background: 'var(--color-surface-0)',
+            borderColor: 'var(--color-surface-200)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.07)',
+          }}
+        >
+          {/* 빠른 명령 토글 */}
+          <button
+            onClick={() => setShowHints(v => !v)}
+            className="p-1 rounded-lg shrink-0 mb-0.5 transition-colors"
+            style={{ color: showHints ? 'var(--color-brand-600)' : 'var(--color-ink-300)' }}
+            title="빠른 명령"
+          >
+            <Paperclip size={16} />
+          </button>
+
+          {/* 텍스트 영역 */}
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            placeholder="메시지를 입력하세요… (Shift+Enter: 줄바꿈)"
+            rows={1}
+            className="flex-1 resize-none bg-transparent text-sm outline-none leading-relaxed"
+            style={{
+              color: 'var(--color-ink-900)',
+              minHeight: '24px',
+              maxHeight: '160px',
+            }}
+          />
+
+          {/* 전송 / 중지 버튼 */}
+          {isStreaming ? (
+            <button
+              onClick={onCancel}
+              className="p-2 rounded-xl shrink-0 mb-0.5 transition-colors"
+              style={{ background: 'var(--color-danger-500)', color: '#fff' }}
+              title="생성 중지"
+            >
+              <Square size={14} />
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!value.trim()}
+              className="p-2 rounded-xl shrink-0 mb-0.5 transition-colors"
+              style={{
+                background: value.trim() ? 'var(--color-brand-600)' : 'var(--color-surface-100)',
+                color: value.trim() ? '#fff' : 'var(--color-ink-300)',
+                cursor: value.trim() ? 'pointer' : 'not-allowed',
+              }}
+              title="전송 (Enter)"
+            >
+              <Send size={14} />
+            </button>
+          )}
+        </div>
+
+        <p className="mt-2 text-[10px] text-center" style={{ color: 'var(--color-ink-200)' }}>
+          AI는 실수할 수 있습니다. 중요한 파일은 반드시 백업하세요.
+        </p>
+      </div>
     </div>
   )
 }

@@ -39,6 +39,9 @@
   /* Typography */
   --font-sans: 'Pretendard Variable', 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+
+  /* Layout */
+  --chat-max-w: 768px;
 }
 
 /* ===== Global Reset ===== */
@@ -63,7 +66,6 @@ body {
 }
 
 #root {
-  display: flex;
   height: 100vh;
   overflow: hidden;
 }

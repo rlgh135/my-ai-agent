@@ -19,26 +19,23 @@ export default function Header() {
 
   return (
     <header
-      className="flex items-center gap-3 px-4 h-14 border-b shrink-0"
-      style={{ background: 'var(--color-surface-0)', borderColor: 'var(--color-surface-200)' }}
+      className="flex items-center gap-2 px-3 h-11 shrink-0"
+      style={{ background: 'var(--color-surface-50)' }}
     >
       {/* 사이드바 토글 */}
       <button
         onClick={toggleSidebar}
-        className="p-1.5 rounded-md transition-colors"
-        style={{ color: 'var(--color-ink-500)' }}
+        className="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-200)]"
+        style={{ color: 'var(--color-ink-400)' }}
         title={sidebarCollapsed ? '사이드바 열기' : '사이드바 닫기'}
       >
         {sidebarCollapsed
-          ? <PanelLeftOpen size={17} />
-          : <PanelLeftClose size={17} />
+          ? <PanelLeftOpen size={16} />
+          : <PanelLeftClose size={16} />
         }
       </button>
 
-      {/* 현재 뷰 제목 */}
-      <h1 className="flex-1 text-sm font-semibold truncate" style={{ color: 'var(--color-ink-900)' }}>
-        {viewLabel[view]}
-      </h1>
+      <div className="flex-1" />
 
       {/* 토큰 배지 (채팅 뷰에서만) */}
       {view === 'chat' && activeSessionId && (
@@ -48,11 +45,11 @@ export default function Header() {
       {/* 설정 버튼 */}
       <button
         onClick={openSettings}
-        className="p-1.5 rounded-md transition-colors"
-        style={{ color: 'var(--color-ink-500)' }}
+        className="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-200)]"
+        style={{ color: 'var(--color-ink-400)' }}
         title="설정"
       >
-        <Settings size={17} />
+        <Settings size={16} />
       </button>
     </header>
   )
