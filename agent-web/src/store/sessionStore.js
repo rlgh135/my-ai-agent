@@ -113,7 +113,20 @@ export const useSessionStore = create((set, get) => ({
       const msgs = [...s.messages]
       const lastIdx = msgs.findLastIndex(m => m.role === 'assistant')
       if (lastIdx === -1) return {}
-      msgs[lastIdx] = { ...msgs[lastIdx], content, streaming: false }
+      msgs[lastIdx] = { ...msgs[lastIdx], content, streaming: false, thinking: false }
+      return { messages: msgs }
+    })
+  },
+
+  setLastAssistantThinking: (thinking) => {
+    set(s => {
+      const msgs = [...s.messages]
+      const lastIdx = msgs.findLastIndex(m => m.role === 'assistant')
+      if (lastIdx === -1) return {}
+      // thinking 진입 시 기존 텍스트가 있으면 줄바꿈 삽입 (다음 턴 텍스트와 분리)
+      const prev = msgs[lastIdx]
+      const content = thinking && prev.content ? prev.content + '\n\n' : prev.content
+      msgs[lastIdx] = { ...prev, content, thinking }
       return { messages: msgs }
     })
   },

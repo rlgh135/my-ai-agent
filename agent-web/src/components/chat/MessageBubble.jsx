@@ -68,8 +68,34 @@ function AssistantBubble({ message }) {
       {message.streaming && !message.content ? (
         <ThinkingDots />
       ) : (
-        <MarkdownContent content={message.content} />
+        <>
+          <MarkdownContent content={message.content} />
+          {message.thinking && <ThinkingIndicator />}
+        </>
       )}
+    </div>
+  )
+}
+
+function ThinkingIndicator() {
+  return (
+    <div
+      className="flex items-center gap-2 mt-2 pt-2 border-t"
+      style={{ borderColor: 'var(--color-surface-200)' }}
+    >
+      <div className="flex gap-1">
+        {[0, 1, 2].map(i => (
+          <div
+            key={i}
+            className="w-1 h-1 rounded-full animate-pulse-dot"
+            style={{
+              background: 'var(--color-brand-400)',
+              animationDelay: `${i * 0.2}s`,
+            }}
+          />
+        ))}
+      </div>
+      <span className="text-xs" style={{ color: 'var(--color-ink-400)' }}>분석 중…</span>
     </div>
   )
 }

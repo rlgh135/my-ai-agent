@@ -28,7 +28,7 @@ function normalizeTokenUsage(raw) {
 export function useSSE() {
   const abortRef = useRef(null)
   const { setStreaming, clearStreaming, setTokenUsage } = useChatStore()
-  const { appendMessage, updateLastAssistantMessage, finalizeAssistantMessage } = useSessionStore()
+  const { appendMessage, updateLastAssistantMessage, finalizeAssistantMessage, setLastAssistantThinking } = useSessionStore()
   const { addPendingTask } = useTaskStore()
 
   const sendMessage = useCallback(async (userMessage) => {
@@ -89,7 +89,11 @@ export function useSSE() {
           let event
           try { event = JSON.parse(raw) } catch { continue }
 
-          if (event.type === 'delta') {
+          if (event.type === 'thinking') {
+            setLastAssistantThinking(true)
+
+          } else if (event.type === 'delta') {
+            setLastAssistantThinking(false)
             updateLastAssistantMessage(event.content)
 
           } else if (event.type === 'token_usage') {
@@ -129,7 +133,7 @@ export function useSSE() {
       clearStreaming()
       abortRef.current = null
     }
-  }, [appendMessage, updateLastAssistantMessage, finalizeAssistantMessage, setStreaming, clearStreaming, setTokenUsage, addPendingTask])
+  }, [appendMessage, updateLastAssistantMessage, finalizeAssistantMessage, setLastAssistantThinking, setStreaming, clearStreaming, setTokenUsage, addPendingTask])
 
   const cancel = useCallback(() => {
     abortRef.current?.abort()

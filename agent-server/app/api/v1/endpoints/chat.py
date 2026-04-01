@@ -531,6 +531,9 @@ async def _stream_chat(session_id: str, message: str):
                 except Exception as exc:
                     logger.error("도구 메시지 DB 저장 실패 (turn %d): %s(%s)", tool_turns, type(exc).__name__, exc)
 
+                # 다음 Claude 호출 전 — 프론트엔드에 "분석 중" 상태 알림
+                yield _sse({"type": "thinking"})
+
             # ── max_tokens 등 기타 stop_reason ────────────────────────────
             else:
                 total_tokens = final_msg.usage.input_tokens + final_msg.usage.output_tokens
