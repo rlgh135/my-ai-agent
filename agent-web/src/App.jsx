@@ -6,6 +6,7 @@ import ChatWindow from '@/components/chat/ChatWindow'
 import FileExplorer from '@/components/files/FileExplorer'
 import SettingsPanel from '@/components/settings/SettingsPanel'
 import SetupScreen from '@/components/setup/SetupScreen'
+import SmtpStatusBanner from '@/components/common/SmtpStatusBanner'
 import { useUiStore } from '@/store/uiStore'
 import { useSettingsStore } from '@/store/settingsStore'
 
@@ -41,21 +42,27 @@ export default function App() {
       <Sidebar />
 
       {/* 메인 영역 */}
-      <div
-        className="flex flex-col overflow-hidden"
-        style={{
-          flex: '0 1 var(--chat-max-w)',
-          minWidth: '320px',
-          margin: '0 auto',
-        }}
-      >
-        {/* 헤더 */}
+      <div className="flex flex-col flex-1 overflow-hidden">
+        {/* 헤더: 사이드바 제외 100% 너비 */}
         <Header />
+        {/* SMTP 경고 배너: 헤더와 동일한 너비 */}
+        <SmtpStatusBanner />
 
-        {/* 콘텐츠 */}
-        {view === 'chat'     && <ChatWindow />}
-        {view === 'files'    && <FileExplorer />}
-        {view === 'settings' && <SettingsRedirect />}
+        {/* 콘텐츠: 최대 너비 제한 */}
+        <div
+          className="flex flex-col flex-1 overflow-hidden"
+          style={{
+            flex: '1 1 0',
+            width: '100%',
+            maxWidth: 'var(--chat-max-w)',
+            minWidth: '320px',
+            margin: '0 auto',
+          }}
+        >
+          {view === 'chat'     && <ChatWindow />}
+          {view === 'files'    && <FileExplorer />}
+          {view === 'settings' && <SettingsRedirect />}
+        </div>
       </div>
 
       {/* 설정 모달 (헤더 아이콘 / 사이드바 버튼으로 열림) */}
