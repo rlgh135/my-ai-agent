@@ -9,6 +9,7 @@ async function request(path, options = {}) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw Object.assign(new Error(err.detail || 'API Error'), { status: res.status, data: err })
   }
+  if (res.status === 204 || res.headers.get('Content-Length') === '0') return null
   return res.json()
 }
 
