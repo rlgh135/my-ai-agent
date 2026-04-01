@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # 암호화가 필요한 설정 키 목록
-_SENSITIVE_KEYS = {"anthropic_api_key", "smtp_password", "brave_api_key", "naver_api_key"}
+_SENSITIVE_KEYS = {"anthropic_api_key", "smtp_password", "naver_api_key"}
 
 # 더 이상 유효하지 않은 Claude 모델 ID 목록 (DB에 저장된 구버전 값 무시)
 _DEPRECATED_MODELS = {
@@ -40,7 +40,6 @@ _KEY_TO_ATTR: dict[str, str] = {
     "smtp_user":           "SMTP_USER",
     "smtp_password":       "SMTP_PASSWORD",
     "smtp_from":           "SMTP_FROM",
-    "brave_api_key":       "BRAVE_API_KEY",
     "naver_client_id":     "NAVER_CLIENT_ID",
     "naver_api_key":       "NAVER_API_KEY",
 }
@@ -106,7 +105,6 @@ async def get_settings():
         "smtp_configured":              settings.smtp_configured,
         # 검색
         "search_provider":              settings.SEARCH_PROVIDER,
-        "brave_configured":             bool(settings.BRAVE_API_KEY),
         "naver_client_id":              getattr(settings, "NAVER_CLIENT_ID", ""),  # Client ID는 비민감
         "naver_configured":             naver_configured,
     }

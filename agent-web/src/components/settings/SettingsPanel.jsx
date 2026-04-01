@@ -10,7 +10,7 @@ import { getSmtpStatus } from '@/api/email'
 
 // ── 필드 정의 ─────────────────────────────────────────────────────────────────
 // allowed_directories는 별도 컴포넌트(DirectoriesField)로 처리
-// anthropic_api_key / smtp_password / brave_api_key / naver_api_key 는 서버에서 값을 내려주지 않음 (설정 여부만 반환)
+// anthropic_api_key / smtp_password / naver_api_key 는 서버에서 값을 내려주지 않음 (설정 여부만 반환)
 // → 빈 채로 저장 시 서버는 기존 값 보존
 const FIELD_DEFS = [
   {
@@ -47,27 +47,10 @@ const FIELD_DEFS = [
     searchSection: true,
     fields: [
       {
-        key: 'search_provider',
-        label: '기본 검색 엔진',
-        type: 'select',
-        options: [
-          { value: 'brave',      label: 'Brave Search (영문)' },
-          { value: 'naver',      label: 'Naver Search (한국어)' },
-          { value: 'duckduckgo', label: 'DuckDuckGo (무료, 제한적)' },
-        ],
-      },
-      {
-        key: 'brave_api_key',
-        label: 'Brave API Key',
-        type: 'password',
-        placeholder: 'BSA... (없으면 DuckDuckGo 사용)',
-        configuredKey: 'brave_configured',
-      },
-      {
         key: 'naver_client_id',
         label: 'Naver Client ID',
         type: 'text',
-        placeholder: 'Naver Developers에서 발급',
+        placeholder: 'Naver Developers에서 발급 (한국어 검색용)',
       },
       {
         key: 'naver_api_key',
@@ -252,19 +235,14 @@ function DirectoriesField({ value, onChange }) {
 
 // ── 검색 상태 표시 ─────────────────────────────────────────────────────────────
 function SearchStatusRow({ settings }) {
-  const hasSearch = settings.brave_configured || settings.naver_configured
-
-  if (hasSearch) {
-    const active = []
-    if (settings.naver_configured) active.push('Naver (한국어)')
-    if (settings.brave_configured)  active.push('Brave (영문)')
+  if (settings.naver_configured) {
     return (
       <div
         className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
         style={{ background: '#f0fdf4', color: '#16a34a' }}
       >
         <Search size={12} />
-        <span>검색 사용 가능: {active.join(', ')}</span>
+        <span>한국어: Naver / 영문: DuckDuckGo</span>
       </div>
     )
   }
@@ -275,7 +253,7 @@ function SearchStatusRow({ settings }) {
       style={{ background: 'var(--color-surface-100)', color: 'var(--color-ink-500)' }}
     >
       <Search size={12} />
-      <span>API Key 미설정 시 DuckDuckGo(무료, 제한적)가 사용됩니다.</span>
+      <span>DuckDuckGo 사용 중 (기본값) · 한국어 검색 강화: Naver API 설정</span>
     </div>
   )
 }

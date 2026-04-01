@@ -43,8 +43,7 @@ class Settings(BaseSettings):
     SMTP_FROM: str = ""                   # 발신자 표시명. 비어있으면 SMTP_USER 사용
 
     # ── Search ───────────────────────────────────────────────────────────────
-    SEARCH_PROVIDER: str = "brave"        # brave | naver | duckduckgo
-    BRAVE_API_KEY: str = ""
+    SEARCH_PROVIDER: str = "duckduckgo"  # duckduckgo | naver
     NAVER_CLIENT_ID: str = ""            # 네이버 검색 API Client ID
     NAVER_API_KEY: str = ""              # 네이버 검색 API Client Secret
 
