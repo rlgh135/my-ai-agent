@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import SessionNotFoundError
+from app.core.logger import get_chat_logger, get_error_logger, get_tool_logger
 from app.db.database import AsyncSessionLocal, get_db
 from app.models.message import Message
 from app.models.session import ChatSession
@@ -19,6 +20,9 @@ from app.schemas.chat import ChatRequest, TokenUsageOut
 from app.services.token_counter import count_messages_tokens, get_usage_status
 
 logger = logging.getLogger(__name__)
+chat_log  = get_chat_logger()
+tool_log  = get_tool_logger()
+error_log = get_error_logger()
 router = APIRouter()
 
 MAX_TOOL_TURNS = 5  # 무한 루프 방지
@@ -163,11 +167,16 @@ _RISKY_TOOLS: dict[str, str] = {
 _SYSTEM_PROMPT_BASE = """당신은 SI 개발자를 위한 로컬 AI 에이전트입니다.
 사용자의 자연어 지시를 받아 파일 탐색/생성/수정/백업, 이메일 전송, 웹 검색 등의 작업을 수행합니다.
 
-규칙:
-- 사용자가 파일 생성·수정·삭제·이메일 발송을 요청하면 즉시 해당 도구(create_file, update_file, backup_file, delete_file, send_email)를 호출하십시오. 도구 호출 자체가 사용자 승인 요청이며, 사용자가 UI에서 직접 승인/거부를 선택합니다. 도구를 호출하지 않고 텍스트로 "파일을 만들까요?", "진행할까요?" 등 구두로 허락을 구하지 마십시오.
-- 파일 수정(update_file) 전에는 항상 backup_file을 먼저 호출하십시오.
-- 읽기 전용 작업(web_search, list_directory, read_file)은 즉시 수행합니다.
-- 작업 결과를 한국어로 사용자에게 명확히 알려주십시오."""
+[도구 호출 규칙 — 반드시 준수]
+1. 파일 생성·수정·삭제·이메일 발송이 포함된 요청은 반드시 해당 도구(create_file, update_file, backup_file, delete_file, send_email)를 호출하십시오.
+   - 도구 호출 자체가 사용자 승인 요청입니다. 사용자가 UI에서 직접 승인·거부를 선택합니다.
+   - "파일을 만들까요?", "진행할까요?", "경로를 알려주세요" 등 어떤 형태의 구두 확인도 절대 하지 마십시오.
+   - 출력 경로가 명시되지 않아도 묻지 말고, 기본 작업 디렉토리와 적절한 파일명을 직접 결정하여 즉시 도구를 호출하십시오.
+2. 여러 단계로 이루어진 작업(예: 파일 읽기 → 변환 → 새 파일 생성)은 각 단계의 도구를 연속으로 호출하여 완료하십시오.
+   - 중간 단계 결과만 보고하고 멈추지 마십시오. 다음 단계 도구를 바로 호출하십시오.
+3. 파일 수정(update_file) 전에는 항상 backup_file을 먼저 호출하십시오.
+4. 읽기 전용 작업(web_search, list_directory, read_file)은 즉시 수행합니다.
+5. 작업 결과를 한국어로 사용자에게 명확히 알려주십시오."""
 
 
 def _build_system_prompt() -> str:
@@ -189,7 +198,7 @@ def _build_system_prompt() -> str:
 - 접근 가능한 허용 경로:
 {dir_list}
 - 기본 작업 디렉토리: {default_dir}
-- 사용자가 경로를 명시하지 않고 "이 폴더", "현재 폴더", "지금 폴더" 등으로 요청하면 기본 작업 디렉토리({default_dir})를 사용하십시오."""
+- 경로가 명시되지 않은 경우(입력 파일·출력 파일 모두 해당) 기본 작업 디렉토리({default_dir})를 사용하고, 파일명은 맥락에 맞게 직접 결정하십시오. 경로나 파일명을 사용자에게 묻지 마십시오."""
 
     return _SYSTEM_PROMPT_BASE + directory_section
 
@@ -199,6 +208,17 @@ def _build_system_prompt() -> str:
 def _sse(data: dict) -> str:
     """SSE 직렬화. 프론트엔드 useSSE.js의 type 필드 기반 분기와 매핑됨."""
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _trim(params: dict, max_len: int = 200) -> str:
+    """로그용 params 요약 — content 필드는 앞 200자만 표시."""
+    trimmed = {}
+    for k, v in params.items():
+        if isinstance(v, str) and len(v) > max_len:
+            trimmed[k] = v[:max_len] + f"…({len(v)}자)"
+        else:
+            trimmed[k] = v
+    return str(trimmed)
 
 
 def _get_client() -> anthropic.AsyncAnthropic:
@@ -267,50 +287,68 @@ def _make_task_event(tool_name: str, params: dict, task_id: str) -> dict:
 async def _run_safe_tool(tool_name: str, params: dict) -> str:
     """읽기 전용 도구를 즉시 실행하고 결과 문자열을 반환."""
     from app.mcp import filesystem, search as search_mcp
+    tool_log.info("SAFE  START | tool=%s | params=%s", tool_name, _trim(params))
     try:
         if tool_name == "web_search":
             result = await search_mcp.web_search(params["query"], params.get("limit", 5))
-            return json.dumps(result, ensure_ascii=False)
+            out = json.dumps(result, ensure_ascii=False)
+            tool_log.info("SAFE  OK    | tool=%s | result_len=%d", tool_name, len(out))
+            return out
         if tool_name == "list_directory":
             result = filesystem.list_directory(params["path"])
-            return json.dumps(result, ensure_ascii=False)
+            out = json.dumps(result, ensure_ascii=False)
+            tool_log.info("SAFE  OK    | tool=%s | items=%d", tool_name, len(result.get("items", [])))
+            return out
         if tool_name == "read_file":
             result = filesystem.read_file(params["path"])
+            tool_log.info("SAFE  OK    | tool=%s | path=%s | content_len=%d", tool_name, params.get("path"), len(result["content"]))
             return result["content"]
     except Exception as exc:
+        tool_log.error("SAFE  ERROR | tool=%s | error=%s", tool_name, exc)
+        error_log.error("safe_tool=%s params=%s error=%s", tool_name, _trim(params), exc)
         logger.warning("safe tool %s 실행 오류: %s", tool_name, exc)
         return f"오류: {exc}"
+    tool_log.warning("SAFE  UNKNOWN | tool=%s", tool_name)
     return f"알 수 없는 도구: {tool_name}"
 
 
 async def _run_risky_tool(tool_name: str, params: dict) -> str:
     """사용자가 승인한 위험 도구를 실행하고 결과 문자열을 반환."""
     from app.mcp import filesystem, email_sender
+    tool_log.info("RISKY START | tool=%s | params=%s", tool_name, _trim(params))
     try:
         if tool_name == "create_file":
             result = filesystem.create_file(
                 params["path"], params["content"], params.get("overwrite", False)
             )
-            return f"파일 생성 완료: {result['path']} ({result['size']} bytes)"
+            msg = f"파일 생성 완료: {result['path']} ({result['size']} bytes)"
+            tool_log.info("RISKY OK    | tool=%s | %s", tool_name, msg)
+            return msg
 
         if tool_name == "update_file":
-            # 백업 먼저 — 실패해도 업데이트는 진행
             backup_info = ""
             try:
                 backup = filesystem.backup_file(params["path"])
                 backup_info = f" | 백업: {backup['backup_path']}"
             except Exception as be:
                 logger.warning("자동 백업 실패 (업데이트는 계속): %s", be)
+                tool_log.warning("RISKY WARN  | auto-backup failed for update_file: %s", be)
             result = filesystem.update_file(params["path"], params["content"])
-            return f"파일 수정 완료: {result['path']} ({result['size']} bytes){backup_info}"
+            msg = f"파일 수정 완료: {result['path']} ({result['size']} bytes){backup_info}"
+            tool_log.info("RISKY OK    | tool=%s | %s", tool_name, msg)
+            return msg
 
         if tool_name == "backup_file":
             result = filesystem.backup_file(params["path"], params.get("dest_path", ""))
-            return f"백업 완료: {result['backup_path']}"
+            msg = f"백업 완료: {result['backup_path']}"
+            tool_log.info("RISKY OK    | tool=%s | %s", tool_name, msg)
+            return msg
 
         if tool_name == "delete_file":
             result = filesystem.delete_file(params["path"])
-            return f"파일 삭제 완료: {result['deleted_path']} | 백업: {result['backup_path']}"
+            msg = f"파일 삭제 완료: {result['deleted_path']} | 백업: {result['backup_path']}"
+            tool_log.info("RISKY OK    | tool=%s | %s", tool_name, msg)
+            return msg
 
         if tool_name == "send_email":
             result = await email_sender.send_email(
@@ -320,12 +358,17 @@ async def _run_risky_tool(tool_name: str, params: dict) -> str:
                 cc=params.get("cc"),
                 attachments=params.get("attachments"),
             )
-            return f"이메일 전송 완료. (message_id: {result.get('message_id', 'N/A')})"
+            msg = f"이메일 전송 완료. (message_id: {result.get('message_id', 'N/A')})"
+            tool_log.info("RISKY OK    | tool=%s | %s", tool_name, msg)
+            return msg
 
     except Exception as exc:
+        tool_log.error("RISKY ERROR | tool=%s | error=%s", tool_name, exc)
+        error_log.error("risky_tool=%s params=%s error=%s", tool_name, _trim(params), exc)
         logger.error("risky tool %s 실행 오류: %s", tool_name, exc)
         return f"실행 오류: {exc}"
 
+    tool_log.warning("RISKY UNKNOWN | tool=%s", tool_name)
     return f"알 수 없는 도구: {tool_name}"
 
 
@@ -355,6 +398,7 @@ async def _process_tool_block(block):
 
         # ① future 등록을 먼저 (yield 전에) 해야 race condition 없음
         future = register_task(task_id, tool_name, params)
+        chat_log.info("TASK  PENDING  | task_id=%s | tool=%s | path=%s", task_id, tool_name, params.get("path", ""))
 
         # ② task_pending 이벤트를 yield → 호출자가 SSE 전송
         yield _make_task_event(tool_name, params, task_id)
@@ -365,6 +409,7 @@ async def _process_tool_block(block):
         except Exception:
             decision = "rejected"
 
+        chat_log.info("TASK  DECISION | task_id=%s | tool=%s | decision=%s", task_id, tool_name, decision)
         if decision == "rejected":
             content = "사용자가 작업을 취소했습니다."
         else:
@@ -447,10 +492,15 @@ async def _stream_chat(session_id: str, message: str):
     final_text = ""
     tool_turns = 0
 
+    chat_log.info("SESSION START | session=%s | msg_preview=%s", session_id, message[:80])
+
     try:
         # ── Agentic Loop ────────────────────────────────────────────────────
         while tool_turns <= MAX_TOOL_TURNS:
             full_text = ""
+
+            chat_log.info("CLAUDE CALL  | session=%s | turn=%d | messages=%d",
+                          session_id, tool_turns, len(messages))
 
             # Claude API 호출 — DB 커넥션 없이 실행
             async with client.messages.stream(
@@ -467,10 +517,15 @@ async def _stream_chat(session_id: str, message: str):
                 final_msg = await stream.get_final_message()
 
             final_text = full_text
+            chat_log.info("CLAUDE RESP  | session=%s | turn=%d | stop_reason=%s | text_len=%d",
+                          session_id, tool_turns, final_msg.stop_reason, len(final_text))
 
             # ── 순수 텍스트 응답 → 루프 종료 ─────────────────────────────
             if final_msg.stop_reason == "end_turn":
                 total_tokens = final_msg.usage.input_tokens + final_msg.usage.output_tokens
+                # [진단 핵심] end_turn 시 Claude가 실제로 뭐라고 답했는지 전문 기록
+                chat_log.info("END_TURN     | session=%s | turn=%d | final_text=%s",
+                              session_id, tool_turns, final_text)
                 try:
                     await _save_messages([{
                         "session_id": session_uuid, "role": "assistant",
@@ -482,6 +537,7 @@ async def _stream_chat(session_id: str, message: str):
                     )
                 except Exception as db_exc:
                     logger.error("DB 저장 실패 (end_turn): %s(%s)", type(db_exc).__name__, db_exc)
+                chat_log.info("DONE SENT    | session=%s | turn=%d", session_id, tool_turns)
                 yield _sse({
                     "type": "done",
                     "content": final_text,
@@ -492,6 +548,9 @@ async def _stream_chat(session_id: str, message: str):
             # ── tool_use 응답 → 도구 실행 후 계속 ────────────────────────
             elif final_msg.stop_reason == "tool_use":
                 tool_turns += 1
+                tool_names = [b.name for b in final_msg.content if b.type == "tool_use"]
+                chat_log.info("TOOL_USE     | session=%s | turn=%d | tools=%s",
+                              session_id, tool_turns, tool_names)
 
                 # Anthropic API 허용 필드만 추출 (parsed_output 등 내부 필드 제외)
                 assistant_content = []
@@ -540,6 +599,8 @@ async def _stream_chat(session_id: str, message: str):
             # ── max_tokens 등 기타 stop_reason ────────────────────────────
             else:
                 total_tokens = final_msg.usage.input_tokens + final_msg.usage.output_tokens
+                chat_log.warning("OTHER_STOP   | session=%s | turn=%d | stop_reason=%s | text=%s",
+                                 session_id, tool_turns, final_msg.stop_reason, final_text)
                 try:
                     await _save_messages([{
                         "session_id": session_uuid, "role": "assistant",
@@ -551,6 +612,7 @@ async def _stream_chat(session_id: str, message: str):
                     )
                 except Exception as db_exc:
                     logger.error("DB 저장 실패 (stop_reason=%s): %s(%s)", final_msg.stop_reason, type(db_exc).__name__, db_exc)
+                chat_log.info("DONE SENT    | session=%s | turn=%d (other_stop)", session_id, tool_turns)
                 yield _sse({
                     "type": "done",
                     "content": final_text,
@@ -575,35 +637,43 @@ async def _stream_chat(session_id: str, message: str):
             return
 
     # ── Anthropic API 예외 처리 ──────────────────────────────────────────
-    except anthropic.AuthenticationError:
+    except anthropic.AuthenticationError as e:
+        error_log.error("AuthenticationError | session=%s | %s", session_id, e)
         yield _sse({"type": "error", "message": "API 인증 실패: 설정의 ANTHROPIC_API_KEY를 확인하세요.", "error_code": "auth_failed"})
         return
-    except anthropic.PermissionDeniedError:
+    except anthropic.PermissionDeniedError as e:
+        error_log.error("PermissionDeniedError | session=%s | %s", session_id, e)
         yield _sse({"type": "error", "message": "API 접근 권한이 없습니다.", "error_code": "permission_denied"})
         return
-    except anthropic.RateLimitError:
+    except anthropic.RateLimitError as e:
+        error_log.error("RateLimitError | session=%s | %s", session_id, e)
         yield _sse({"type": "error", "message": "API 요청 한도를 초과했습니다. 잠시 후 다시 시도하세요.", "error_code": "rate_limit"})
         return
     except anthropic.BadRequestError as e:
         body = getattr(e, "body", {}) or {}
         inner = body.get("error", {}) if isinstance(body, dict) else {}
         raw_msg = inner.get("message", "") or str(e)
+        error_log.error("BadRequestError | session=%s | %s", session_id, raw_msg)
         if "credit balance" in raw_msg.lower() or "billing" in raw_msg.lower():
             yield _sse({"type": "error", "message": "Anthropic API 크레딧이 부족합니다.", "error_code": "insufficient_credits"})
         else:
             yield _sse({"type": "error", "message": f"잘못된 요청: {raw_msg}", "error_code": "bad_request"})
         return
-    except anthropic.InternalServerError:
+    except anthropic.InternalServerError as e:
+        error_log.error("InternalServerError | session=%s | %s", session_id, e)
         yield _sse({"type": "error", "message": "Anthropic 서버 오류입니다. 잠시 후 다시 시도하세요.", "error_code": "server_error"})
         return
-    except anthropic.APIConnectionError:
+    except anthropic.APIConnectionError as e:
+        error_log.error("APIConnectionError | session=%s | %s", session_id, e)
         yield _sse({"type": "error", "message": "Anthropic API 서버에 연결할 수 없습니다.", "error_code": "connection_error"})
         return
     except anthropic.APIError as e:
+        error_log.error("APIError | session=%s | %s", session_id, e)
         yield _sse({"type": "error", "message": f"API 오류: {e}", "error_code": "api_error"})
         return
     except Exception as e:
         logger.error("예상치 못한 오류: %s(%s)", type(e).__name__, e)
+        error_log.error("UnexpectedError | session=%s | %s: %s", session_id, type(e).__name__, e)
         yield _sse({"type": "error", "message": "서버 내부 오류가 발생했습니다.", "error_code": "server_error"})
         return
 
