@@ -226,9 +226,18 @@ def _get_client() -> anthropic.AsyncAnthropic:
     return anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 
+# 히스토리 재로드 시 tool_result 내용 축약 기준 (누적 context 토큰 폭증 방지)
+# 현재 요청 중 생성된 tool_result는 메모리에서 전체 사용 — DB 재로드 시만 적용
+_TOOL_RESULT_HISTORY_MAX_CHARS = 3_000
+
+
 def _build_history(messages_from_db: list) -> list[dict]:
     """DB 메시지 목록에서 Anthropic API 형식의 messages 배열 재구성.
     tool_use / tool_result 타입은 JSON으로 저장되어 있어 파싱 후 반환.
+
+    tool_result content가 _TOOL_RESULT_HISTORY_MAX_CHARS 초과 시 축약.
+    → 대용량 파일 읽기 결과(pptx 등)가 이후 요청마다 히스토리에 통째로 실려
+      input token 수가 폭증하는 현상 방지.
     """
     result = []
     for m in messages_from_db:
@@ -237,6 +246,18 @@ def _build_history(messages_from_db: list) -> list[dict]:
                 content = json.loads(m.content)
             except (json.JSONDecodeError, TypeError):
                 continue  # 파싱 실패 시 이 메시지 건너뜀
+
+            # tool_result 내 content 문자열 축약
+            if m.msg_type == "tool_result" and isinstance(content, list):
+                for item in content:
+                    if not isinstance(item, dict):
+                        continue
+                    raw = item.get("content")
+                    if isinstance(raw, str) and len(raw) > _TOOL_RESULT_HISTORY_MAX_CHARS:
+                        item["content"] = (
+                            raw[:_TOOL_RESULT_HISTORY_MAX_CHARS]
+                            + f"\n...[이전 결과 축약 — 원본 {len(raw)}자]"
+                        )
         elif m.role in ("user", "assistant"):
             content = m.content
         else:
