@@ -1,5 +1,5 @@
 """filesystem MCP 래퍼 — 파일 Read / Create / Update / Backup / Delete
-지원 포맷: 텍스트 (utf-8), Word (.docx), Excel (.xlsx)
+지원 포맷: 텍스트 (utf-8), Word (.docx), Excel (.xlsx), PowerPoint (.pptx)
 """
 import os
 import re
@@ -27,6 +27,14 @@ try:
     _XLSX_OK = True
 except ImportError:
     _XLSX_OK = False
+
+try:
+    import pptx as _pptx          # python-pptx
+    from pptx.util import Inches, Pt
+    from pptx.enum.text import PP_ALIGN
+    _PPTX_OK = True
+except ImportError:
+    _PPTX_OK = False
 
 
 # ── 경로 검증 ──────────────────────────────────────────────────────────────────
@@ -94,6 +102,10 @@ def read_file(path: str) -> dict:
         content = _read_xlsx(p)
         return {"path": str(p), "content": content, "size": p.stat().st_size, "encoding": "xlsx"}
 
+    if ext == ".pptx":
+        content = _read_pptx(p)
+        return {"path": str(p), "content": content, "size": p.stat().st_size, "encoding": "pptx"}
+
     # 기본: UTF-8 텍스트
     content = p.read_text(encoding="utf-8", errors="replace")
     return {"path": str(p), "content": content, "size": p.stat().st_size, "encoding": "utf-8"}
@@ -111,6 +123,27 @@ def _read_docx(p: Path) -> str:
         for row in table.rows:
             lines.append("\t".join(cell.text for cell in row.cells))
     return "\n".join(lines)
+
+
+def _read_pptx(p: Path) -> str:
+    if not _PPTX_OK:
+        return "[python-pptx 미설치 — PowerPoint 파일을 읽으려면 pip install python-pptx 를 실행하세요]"
+    prs = _pptx.Presentation(str(p))
+    sections = []
+    for i, slide in enumerate(prs.slides, 1):
+        lines = [f"=== Slide {i} ==="]
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    text = para.text.strip()
+                    if text:
+                        lines.append(text)
+            # 표(table) 내용 추출
+            if shape.has_table:
+                for row in shape.table.rows:
+                    lines.append("\t".join(cell.text.strip() for cell in row.cells))
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections)
 
 
 def _read_xlsx(p: Path) -> str:
@@ -158,6 +191,8 @@ def create_file(path: str, content: str, overwrite: bool = False) -> dict:
         _write_docx(p, content)
     elif ext == ".xlsx":
         _write_xlsx(p, content)
+    elif ext == ".pptx":
+        _write_pptx(p, content)
     else:
         p.write_text(content, encoding="utf-8")
 
@@ -176,6 +211,8 @@ def update_file(path: str, content: str) -> dict:
         _write_docx(p, content)
     elif ext == ".xlsx":
         _write_xlsx(p, content)
+    elif ext == ".pptx":
+        _write_pptx(p, content)
     else:
         p.write_text(content, encoding="utf-8")
 
@@ -313,6 +350,119 @@ def _write_xlsx(p: Path, content: str) -> None:
             sheet.column_dimensions[col[0].column_letter].width = min(max_len + 4, 50)
 
     wb.save(str(p))
+
+
+def _write_pptx(p: Path, content: str) -> None:
+    """슬라이드 텍스트를 파싱하여 PowerPoint 파일로 저장.
+
+    슬라이드 구분 포맷:
+      === Slide 1 === 또는 === 슬라이드명 ===  → 새 슬라이드 시작
+      # 제목                                   → 슬라이드 제목 (title placeholder)
+      - 항목 / * 항목                           → 글머리 기호 목록
+      그 외 줄                                  → 본문 텍스트
+      빈 줄                                    → 단락 간격
+
+    슬라이드 구분자가 없으면 전체를 단일 슬라이드로 처리.
+    """
+    if not _PPTX_OK:
+        raise RuntimeError("python-pptx 미설치 — pip install python-pptx")
+
+    prs = _pptx.Presentation()
+    # 기본 레이아웃: 0=제목 슬라이드, 1=제목+내용
+    blank_layout   = prs.slide_layouts[6]  # 완전 빈 슬라이드 (fallback)
+    content_layout = prs.slide_layouts[1]  # 제목 + 내용
+
+    # 슬라이드 블록 분리
+    slide_blocks: list[list[str]] = []
+    current: list[str] = []
+    for line in content.splitlines():
+        if re.match(r"^===\s*.+?\s*===$", line.strip()):
+            if current:
+                slide_blocks.append(current)
+            current = []
+        else:
+            current.append(line)
+    if current:
+        slide_blocks.append(current)
+
+    if not slide_blocks:
+        slide_blocks = [[]]
+
+    for block in slide_blocks:
+        title_text = ""
+        body_lines: list[str] = []
+
+        for line in block:
+            stripped = line.rstrip()
+            if stripped.startswith("# ") and not title_text:
+                title_text = stripped[2:]
+            else:
+                body_lines.append(stripped)
+
+        # 레이아웃 선택: 제목이 있으면 content_layout, 없으면 blank
+        layout = content_layout if title_text else blank_layout
+        slide  = prs.slides.add_slide(layout)
+
+        # 제목 placeholder 채우기
+        if title_text:
+            try:
+                slide.shapes.title.text = title_text
+            except Exception:
+                pass
+
+        # 본문 placeholder 채우기 (idx=1)
+        body_placeholder = None
+        if title_text:
+            for ph in slide.placeholders:
+                if ph.placeholder_format.idx == 1:
+                    body_placeholder = ph
+                    break
+
+        body_content = "\n".join(body_lines).strip()
+        if not body_content:
+            continue
+
+        if body_placeholder:
+            tf = body_placeholder.text_frame
+            tf.clear()
+            first = True
+            for line in body_lines:
+                stripped = line.rstrip()
+                if not stripped:
+                    continue
+                if first:
+                    para = tf.paragraphs[0]
+                    first = False
+                else:
+                    para = tf.add_paragraph()
+
+                is_bullet = bool(re.match(r"^[-*] ", stripped))
+                text = stripped[2:] if is_bullet else stripped
+                para.text = text
+                para.level = 1 if is_bullet else 0
+        else:
+            # blank 레이아웃: 텍스트 박스 직접 추가
+            from pptx.util import Inches, Pt
+            left   = Inches(0.5)
+            top    = Inches(0.5)
+            width  = prs.slide_width  - Inches(1)
+            height = prs.slide_height - Inches(1)
+            txBox  = slide.shapes.add_textbox(left, top, width, height)
+            tf     = txBox.text_frame
+            tf.word_wrap = True
+            first = True
+            for line in body_lines:
+                stripped = line.rstrip()
+                if not stripped:
+                    continue
+                if first:
+                    para = tf.paragraphs[0]
+                    first = False
+                else:
+                    para = tf.add_paragraph()
+                para.text = stripped[2:] if re.match(r"^[-*] ", stripped) else stripped
+
+    prs.save(str(p))
 
 
 # ── 파일 삭제 ─────────────────────────────────────────────────────────────────

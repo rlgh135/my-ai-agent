@@ -35,3 +35,4 @@ aiosmtplib>=3.0.0
 # ── Office 문서 ────────────────────────────────────────────────
 python-docx>=1.1.0
 openpyxl>=3.1.0
+python-pptx>=0.6.22
