@@ -44,8 +44,10 @@ Claude AI와 실시간으로 대화하고, 파일 작업·웹 검색·이메일 
 
 | 화면 | 설명 |
 |---|---|
+| 초기 설정 | 최초 실행 시 API 키·사용자명·허용 폴더 경로 입력 |
 | 채팅 | SSE 스트리밍 대화, 마크다운 렌더링, 코드 블록 복사 |
 | 작업 협의 카드 | 파일 생성·수정·이메일 발송 전 승인/거부 요청 UI |
+| SMTP 경고 배너 | SMTP 미설정·연결 실패 시 헤더 하단에 경고 표시 |
 | 파일 탐색기 | 서버 허용 디렉토리 탐색 및 코드 미리보기 |
 | 설정 패널 | Claude 모델, SMTP, 검색 공급자 등 설정 변경 |
 
@@ -59,9 +61,12 @@ agent-web/
 ├── src/
 │   ├── api/                     # fetch 기반 API 클라이언트
 │   │   ├── client.js            # 베이스 클라이언트 (get/post/patch/delete)
+│   │   ├── chat.js
 │   │   ├── sessions.js
 │   │   ├── tasks.js
 │   │   ├── files.js
+│   │   ├── email.js
+│   │   ├── search.js
 │   │   └── settings.js
 │   ├── store/                   # Zustand 전역 상태
 │   │   ├── sessionStore.js      # 세션 목록 · 메시지
@@ -87,10 +92,13 @@ agent-web/
 │   │   │   └── FileExplorer.jsx # 파일 트리 · 코드 미리보기
 │   │   ├── settings/
 │   │   │   └── SettingsPanel.jsx # 설정 모달
+│   │   ├── setup/
+│   │   │   └── SetupScreen.jsx  # 최초 실행 설정 화면 (API 키, 사용자명, 폴더 경로)
 │   │   └── common/
 │   │       ├── TokenBadge.jsx   # 토큰 게이지
 │   │       ├── ToolBadge.jsx    # MCP 도구 배지
-│   │       └── Modal.jsx        # 공통 모달
+│   │       ├── Modal.jsx        # 공통 모달
+│   │       └── SmtpStatusBanner.jsx # SMTP 미설정·연결 실패 경고 배너
 │   ├── App.jsx                  # 루트 컴포넌트 · 뷰 라우팅
 │   ├── main.jsx                 # React DOM 마운트
 │   └── index.css                # Tailwind v4 · 디자인 토큰 · 글로벌 스타일
@@ -114,7 +122,7 @@ agent-web/
 ### 1. 패키지 설치
 
 ```powershell
-cd C:\Users\KIHOPARK\SidePJ\AIMan\code\agent-web
+cd C:\path\to\agent-web
 
 npm install
 ```
@@ -184,11 +192,11 @@ npm run preview
 
 ```powershell
 # 창 1 — 백엔드
-cd C:\Users\KIHOPARK\SidePJ\AIMan\code\agent-server
+cd C:\path\to\agent-server
 .venv\Scripts\uvicorn.exe app.main:app --reload --port 8000
 
 # 창 2 — 프론트엔드
-cd C:\Users\KIHOPARK\SidePJ\AIMan\code\agent-web
+cd C:\path\to\agent-web
 npm run dev
 ```
 

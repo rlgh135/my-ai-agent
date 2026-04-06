@@ -23,15 +23,18 @@ dependencies = [
     "cryptography>=42.0.0",
     # HTTP
     "httpx>=0.27.0",
+    # Search
+    "duckduckgo-search>=6.0.0",
     # Config / Env
+    "pydantic[email]>=2.0.0",
     "pydantic-settings>=2.3.0",
     "python-dotenv>=1.0.0",
     # Email
     "aiosmtplib>=3.0.0",
     # Token counting
     "tiktoken>=0.7.0",
-    # SSE
-    "sse-starlette>=2.1.0",
+    # SQLAlchemy asyncio 간접 의존
+    "greenlet",
 ]
 
 [project.optional-dependencies]
