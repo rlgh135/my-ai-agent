@@ -56,7 +56,7 @@ async def test_smtp_connection() -> dict:
             timeout=5,
         )
         await smtp.connect()
-        await smtp.starttls()
+        # await smtp.starttls()
         await smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
         await smtp.quit()
         return {
