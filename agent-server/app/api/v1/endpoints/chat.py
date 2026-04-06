@@ -494,6 +494,10 @@ async def _stream_chat(session_id: str, message: str):
 
     chat_log.info("SESSION START | session=%s | msg_preview=%s", session_id, message[:80])
 
+    # max_tokens 재시도 횟수 — tool_turns 와 별도로 추적
+    _MAX_TOKENS_RETRIES = 2
+    max_tokens_retry = 0
+
     try:
         # ── Agentic Loop ────────────────────────────────────────────────────
         while tool_turns <= MAX_TOOL_TURNS:
@@ -596,7 +600,49 @@ async def _stream_chat(session_id: str, message: str):
                 # 다음 Claude 호출 전 — 프론트엔드에 "분석 중" 상태 알림
                 yield _sse({"type": "thinking"})
 
-            # ── max_tokens 등 기타 stop_reason ────────────────────────────
+            # ── max_tokens: 출력 토큰 한계 도달 → 재시도 (최대 2회) ──────
+            elif final_msg.stop_reason == "max_tokens":
+                max_tokens_retry += 1
+                tool_turns += 1
+                chat_log.warning("MAX_TOKENS   | session=%s | turn=%d | retry=%d/%d | text_so_far=%s",
+                                 session_id, tool_turns, max_tokens_retry, _MAX_TOKENS_RETRIES, final_text)
+
+                if max_tokens_retry > _MAX_TOKENS_RETRIES:
+                    # 재시도 한계 초과 → 사용자에게 명확한 안내
+                    chat_log.warning("MAX_TOKENS GIVE_UP | session=%s | retries=%d", session_id, max_tokens_retry)
+                    yield _sse({
+                        "type": "error",
+                        "message": (
+                            "파일 내용이 너무 방대하여 한 번에 처리할 수 없습니다. "
+                            "처리할 섹션이나 슬라이드 범위를 지정하거나, 더 작은 파일로 분할하여 시도해 주세요."
+                        ),
+                        "error_code": "output_too_large",
+                    })
+                    return
+
+                # 지금까지 생성된 텍스트가 있으면 컨텍스트에 추가
+                if final_text:
+                    messages.append({"role": "assistant", "content": final_text})
+
+                # 재시도 횟수에 따라 점점 강력한 "간결하게" 지시
+                if max_tokens_retry == 1:
+                    retry_msg = (
+                        "출력 토큰 한계에 도달했습니다. "
+                        "텍스트 설명 없이 즉시 create_file 도구를 호출하십시오. "
+                        "xlsx 내용은 핵심 정보만 포함하여 간결하게 작성하십시오."
+                    )
+                else:
+                    retry_msg = (
+                        "여전히 토큰 한계입니다. "
+                        "xlsx 파일을 최소화하십시오: 컬럼 3개(화면명/기능명, 기능설명, 비고)만 사용하고 "
+                        "최대 50행 이내로 핵심 항목만 포함하십시오. 지금 즉시 create_file을 호출하십시오."
+                    )
+
+                messages.append({"role": "user", "content": retry_msg})
+                yield _sse({"type": "thinking"})
+                # while 루프 계속 → Claude 재호출
+
+            # ── 그 외 알 수 없는 stop_reason ─────────────────────────────
             else:
                 total_tokens = final_msg.usage.input_tokens + final_msg.usage.output_tokens
                 chat_log.warning("OTHER_STOP   | session=%s | turn=%d | stop_reason=%s | text=%s",

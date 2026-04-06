@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # ── Claude API ───────────────────────────────────────────────────────────
     ANTHROPIC_API_KEY: str = ""
     CLAUDE_MODEL: str = "claude-sonnet-4-6"
-    CLAUDE_MAX_TOKENS: int = 8192
+    CLAUDE_MAX_TOKENS: int = 32768
 
     # ── Database (PostgreSQL + asyncpg) ──────────────────────────────────────
     # 형식: postgresql+asyncpg://<user>:<password>@<host>:<port>/<dbname>
